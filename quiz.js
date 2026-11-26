@@ -75,11 +75,19 @@ const QuizModule = (() => {
       selectedTiles = [];
       return;
     }
-    // 그림(emoji)이 있는 항목 우선, 없으면 전체 풀에서 선택
-    const withEmoji = pool.filter(i => i.emoji);
+    const withEmoji = pool.filter(i => i.emoji || (Array.isArray(i.words) && i.words.some(w => w.emoji)));
     const candidatePool = withEmoji.length ? withEmoji : pool;
-    currentQuestion = candidatePool[Math.floor(Math.random() * candidatePool.length)];
-    DB.touchItemAsSeen(currentQuestion.id);
+    const rawPicked = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+    const wordWithEmoji = Array.isArray(rawPicked.words) ? rawPicked.words.find(w => w.emoji) : null;
+
+    currentQuestion = {
+      ...rawPicked,
+      emoji: rawPicked.emoji || (wordWithEmoji ? wordWithEmoji.emoji : '📝'),
+      meaning: rawPicked.emoji ? rawPicked.meaning : (wordWithEmoji ? wordWithEmoji.meaning : rawPicked.meaning),
+      jp: rawPicked.emoji ? rawPicked.jp : (wordWithEmoji ? wordWithEmoji.jp : rawPicked.jp),
+      romaji: rawPicked.emoji ? rawPicked.romaji : (wordWithEmoji ? wordWithEmoji.romaji : rawPicked.romaji)
+    };
+    DB.touchItemAsSeen(rawPicked.id);
 
     const target = cleanTarget(currentQuestion.jp);
     const kanaBank = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'さ', 'し', 'す', 'た', 'ち', 'つ', 'な', 'に', 'の', 'は', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'ん'];
@@ -134,12 +142,12 @@ const QuizModule = (() => {
           <span>점수: <span id="taScoreText">${score}</span>점 · 콤보: <span id="taComboText">${combo}</span></span>
         </div>
 
-        <div class="timer-bar-wrap">
-          <div class="timer-bar-fill" id="taTimerBar" style="width:${pct}%;"></div>
+        <div class="progress-track" style="margin-bottom:12px;">
+          <div class="progress-fill" id="taTimerBar" style="width:${pct}%;"></div>
         </div>
 
         <div class="jp-font" style="font-size:4.2rem; font-weight:900; margin:12px 0;">
-          ${currentQuestion.emoji ? currentQuestion.emoji + ' ' : ''}${currentQuestion.jp}
+          ${currentQuestion.jp}
         </div>
         <p class="hint-text">알맞은 발음과 뜻을 4지선다에서 고르세요</p>
 
@@ -176,6 +184,8 @@ const QuizModule = (() => {
 
         if (timeLeft <= 0) {
           stopTimer();
+          DB.recordGameClear(score, true);
+          if (onProgressChange) onProgressChange();
           const fb = document.getElementById('taFeedback');
           if (fb) {
             fb.style.color = 'var(--accent)';
@@ -230,7 +240,7 @@ const QuizModule = (() => {
 
     container.innerHTML = `
       <div class="card quiz-box">
-        <div style="font-size:3rem; margin:6px 0;">${currentQuestion.emoji || '📝'}</div>
+        <div class="quiz-emoji">${currentQuestion.emoji || '📝'}</div>
         <h3>뜻: <span class="meaning-mask">${currentQuestion.meaning}</span></h3>
         <p class="hint-text" style="margin-top:4px;">글자 타일을 순서대로 눌러 단어를 완성하세요 (${target.length}글자)</p>
 
@@ -306,11 +316,11 @@ const QuizModule = (() => {
 
     container.innerHTML = `
       <div class="card quiz-box">
-        <div style="font-size:3rem; margin:6px 0;">${currentQuestion.emoji || '⌨️'}</div>
+        <div class="quiz-emoji">${currentQuestion.emoji || '⌨️'}</div>
         <h3>뜻: <span class="meaning-mask">${currentQuestion.meaning}</span></h3>
         <p class="hint-text" style="margin-top:4px;">히라가나 또는 로마자(${currentQuestion.romaji})를 직접 입력하세요</p>
 
-        <input type="text" id="directInput" class="quiz-input jp-font" placeholder="예: あ 또는 a" autocomplete="off" />
+        <input type="text" id="directInput" class="quiz-input jp-font" placeholder="예: あめ 또는 ame" autocomplete="off" />
         <div id="inputFeedback" style="min-height:24px; font-weight:700; margin-bottom:12px;"></div>
 
         <div class="btn-row">
@@ -411,7 +421,7 @@ const QuizModule = (() => {
               if (onProgressChange) onProgressChange();
             }
           } else {
-            DB.recordWrongAnswer(a.card.item, '카드 짝 맞추기 오답');
+            DB.recordQuiz(false, a.card.item, '카드 짝 맞추기 오답');
             if (onProgressChange) onProgressChange();
             setTimeout(() => {
               a.btn.classList.remove('flipped');
