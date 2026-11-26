@@ -13,118 +13,244 @@
   <!-- 대형 히라가나 'あ' 배경 워터마크 -->
   <div class="bg-watermark" aria-hidden="true">あ</div>
 
-  <div class="app-shell">
-    <!-- PC 사이드바 내비게이션 -->
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-badge">JP MASTER</span>
-        <h1>일본어 학습기</h1>
-        <p class="brand-sub">입문부터 기초 작문까지</p>
+  <div class="app-shell" id="appShell">
+    <!-- PC 좌측 접이식 사이드바 (학습 영역 선택) -->
+    <aside class="sidebar" id="pcSidebar" aria-label="PC 학습 영역 사이드바">
+      <div class="sidebar-top">
+        <button type="button" class="brand home-trigger" title="홈(대시보드)으로 이동 [단축키: H]">
+          <span class="brand-badge">JP MASTER</span>
+          <h1>일본어 학습기</h1>
+          <p class="brand-sub">입문부터 기초 작문까지</p>
+        </button>
+        <button type="button" id="sidebarToggleBtn" class="sidebar-toggle-btn" title="사이드바 열기/닫기 [단축키: B]" aria-label="사이드바 접기/펼치기">
+          ◀
+        </button>
       </div>
 
-      <nav class="side-nav" aria-label="주 메뉴">
-        <button class="nav-btn active" data-tab="dashboard">📊 학습 대시보드</button>
-        <button class="nav-btn" data-tab="study">📚 탐색 · 암기 · 쓰기</button>
-        <button class="nav-btn" data-tab="quiz">🎮 퀴즈 · 미니게임</button>
-        <button class="nav-btn" data-tab="roadmap">🚀 문법 · 작문 (v2)</button>
+      <div class="sidebar-section-label">학습 영역</div>
+      <nav class="category-side-nav" aria-label="카테고리 선택">
+        <button type="button" class="cat-nav-btn active" data-cat="hiragana">
+          <span class="cat-icon jp-font">あ</span>
+          <span class="cat-text">히라가나</span>
+        </button>
+        <button type="button" class="cat-nav-btn" data-cat="katakana">
+          <span class="cat-icon jp-font">ア</span>
+          <span class="cat-text">가타카나</span>
+        </button>
+        <button type="button" class="cat-nav-btn" data-cat="noun">
+          <span class="cat-icon">📦</span>
+          <span class="cat-text">명사</span>
+        </button>
+        <button type="button" class="cat-nav-btn" data-cat="i_adj">
+          <span class="cat-icon jp-font">い</span>
+          <span class="cat-text">い형용사</span>
+        </button>
+        <button type="button" class="cat-nav-btn" data-cat="na_adj">
+          <span class="cat-icon jp-font">な</span>
+          <span class="cat-text">な형용사</span>
+        </button>
+        <button type="button" class="cat-nav-btn" data-cat="verb">
+          <span class="cat-icon">⚡</span>
+          <span class="cat-text">동사</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
-        <button id="themeToggleDesktop" class="theme-btn" type="button">🌙 다크 모드</button>
-        <button id="resetProgressBtn" class="reset-btn" type="button">학습 기록 초기화</button>
+        <button type="button" id="shortcutHelpBtn" class="utility-btn">⌨️ PC 단축키 안내</button>
+        <button type="button" id="themeToggleDesktop" class="utility-btn">🌙 다크 모드</button>
+        <button type="button" id="resetProgressBtn" class="utility-btn danger">🗑️ 학습 기록 초기화</button>
       </div>
     </aside>
 
-    <!-- 메인 콘텐츠 영역 -->
+    <!-- 메인 래퍼 -->
     <div class="main-wrapper">
-      <!-- 모바일 상단 헤더 -->
-      <header class="mobile-header">
-        <div class="mobile-title">
-          <span class="brand-badge">JP</span>
-          <strong>일본어 학습기</strong>
+      <!-- 상단 통합 헤더 (홈 버튼 + 상단 주요 메뉴 탭 + 컨트롤) -->
+      <header class="top-header">
+        <div class="header-top-row">
+          <!-- 상단 홈 버튼 -->
+          <button type="button" id="headerHomeBtn" class="home-btn home-trigger" title="홈(대시보드)으로 이동">
+            <span class="home-icon">🏠</span>
+            <span class="home-title">일본어 학습기</span>
+          </button>
+
+          <!-- 우측 컨트롤: 뜻 가림 슬라이드 토글 + TTS 테스트/상태 + 테마 -->
+          <div class="header-controls">
+            <label class="hide-meaning-switch" title="뜻 가림 토글 [단축키: M]">
+              <input type="checkbox" id="hideMeaningToggle" />
+              <span class="slider-track"></span>
+              <span class="slider-label">뜻 가림</span>
+            </label>
+
+            <button type="button" id="quickTtsBtn" class="icon-pill-btn" title="현재 항목 음성 듣기 [단축키: S]">
+              🔊 TTS
+            </button>
+
+            <button type="button" id="themeToggleMobile" class="icon-pill-btn mobile-only" aria-label="테마 전환">
+              🌙
+            </button>
+          </div>
         </div>
-        <button id="themeToggleMobile" class="theme-btn small" type="button">🌙</button>
+
+        <!-- 상단 주요 5개 메뉴 탭 (PC: 연결된 세그먼트 탭 / 모바일: 상단 스크롤·균등 탭) -->
+        <nav class="primary-top-tabs" role="tablist" aria-label="주요 학습 메뉴">
+          <button type="button" class="top-tab-btn active" data-tab="dashboard">📊 대시보드</button>
+          <button type="button" class="top-tab-btn" data-tab="study">📚 학습하기</button>
+          <button type="button" class="top-tab-btn" data-tab="quiz">🎮 퀴즈 및 게임</button>
+          <button type="button" class="top-tab-btn" data-tab="grammar">📐 문법</button>
+          <button type="button" class="top-tab-btn" data-tab="writing_comp">✍️ 작문</button>
+        </nav>
       </header>
 
-      <!-- 상단 학습 카테고리 필터 바 -->
-      <div class="category-bar" role="tablist" aria-label="학습 영역 선택">
-        <button class="cat-chip active" data-cat="all">전체</button>
-        <button class="cat-chip" data-cat="hiragana">히라가나</button>
-        <button class="cat-chip" data-cat="katakana">가타카나</button>
-        <button class="cat-chip" data-cat="noun">명사</button>
-        <button class="cat-chip" data-cat="i_adj">い형용사</button>
-        <button class="cat-chip" data-cat="na_adj">な형용사</button>
-        <button class="cat-chip" data-cat="verb">동사</button>
-      </div>
-
+      <!-- 메인 콘텐츠 영역 -->
       <main class="content-area">
-        <!-- 1. 대시보드 탭 -->
+        <!-- 1. 대시보드 (홈페이지) -->
         <section id="tab-dashboard" class="tab-panel active">
           <div class="panel-header">
-            <h2>📊 학습 현황 및 카테고리별 대시보드</h2>
-            <p>문자·어휘 암기부터 문법·작문까지 단계별 성취도를 확인하세요.</p>
+            <h2>📊 학습 대시보드</h2>
+            <p>전체 및 카테고리별 숙련도를 확인하고 즐겨찾기·오답·복습 항목을 바로 학습하세요.</p>
           </div>
+
+          <!-- 상단 핵심 요약 카드 -->
           <div id="dashboardStats" class="stats-grid"></div>
+
+          <!-- 카테고리별 진도율 -->
           <div class="card">
-            <h3>카테고리별 세부 진도율</h3>
+            <div class="card-title-row">
+              <h3>카테고리별 진도율</h3>
+              <span class="hint-text">카테고리를 클릭하면 학습하기 화면으로 이동합니다</span>
+            </div>
             <div id="categoryProgressList" class="progress-list"></div>
+          </div>
+
+          <!-- 대시보드 유틸리티 서브 탭 (즐겨찾기 / 오답노트 / 복습필요 / 웹 사용방법) -->
+          <div class="card">
+            <div class="dash-util-tabs" role="tablist">
+              <button type="button" class="dash-util-btn active" data-util="favorites">⭐ 즐겨찾기 바로가기</button>
+              <button type="button" class="dash-util-btn" data-util="wrong">❌ 오답노트</button>
+              <button type="button" class="dash-util-btn" data-util="review">🔁 복습필요 단어·문자</button>
+              <button type="button" class="dash-util-btn" data-util="guide">📖 웹 사용방법</button>
+            </div>
+            <div id="dashboardUtilContent" class="dash-util-content"></div>
           </div>
         </section>
 
-        <!-- 2. 탐색·암기·쓰기 탭 -->
+        <!-- 2. 학습하기 탭 (히라가나 심화 + 타 카테고리) -->
         <section id="tab-study" class="tab-panel">
-          <div class="panel-header">
-            <h2>📚 탐색 · 암기 · 능동 쓰기 연습</h2>
-            <p>원하는 학습 모드를 선택하여 문자와 품사별 단어를 익혀보세요.</p>
+          <!-- 현재 선택된 영역 배지 및 작은 진도표 요약 -->
+          <div id="studySummaryBanner" class="study-summary-banner"></div>
+
+          <!-- 히라가나 전용 서브 탭 (50음도 / 플래시카드 / 획순&따라쓰기 / 연상 암기법 / 문자별 단어·예문) -->
+          <div id="hiraganaSubTabs" class="sub-tabs">
+            <button type="button" class="sub-btn active" data-mode="chart">🀄 50음도 표</button>
+            <button type="button" class="sub-btn" data-mode="flashcard">🗂️ 문자별 플래시카드</button>
+            <button type="button" class="sub-btn" data-mode="stroke">✍️ 획순 & 따라쓰기</button>
+            <button type="button" class="sub-btn" data-mode="mnemonic">💡 연상 암기법</button>
+            <button type="button" class="sub-btn" data-mode="examples">📖 문자별 단어·예문</button>
           </div>
 
-          <div class="sub-tabs">
-            <button class="sub-btn active" data-mode="chart">문자표 · 단어목록</button>
-            <button class="sub-btn" data-mode="flashcard">플래시카드 · 연상암기</button>
-            <button class="sub-btn" data-mode="writing">쓰기 연습 (캔버스)</button>
-            <button class="sub-btn" data-mode="row">행별(あかさた…) 단어·예문</button>
+          <!-- 타 카테고리(가타카나/명사/형용사/동사)용 기본 서브 탭 -->
+          <div id="generalSubTabs" class="sub-tabs hidden">
+            <button type="button" class="sub-btn active" data-mode="chart">📋 목록·문자표</button>
+            <button type="button" class="sub-btn" data-mode="flashcard">🗂️ 플래시카드</button>
+            <button type="button" class="sub-btn" data-mode="stroke">✍️ 따라쓰기</button>
           </div>
 
           <div id="studyContainer" class="study-container"></div>
         </section>
 
-        <!-- 3. 퀴즈 및 미니게임 탭 -->
+        <!-- 3. 퀴즈 및 게임 탭 -->
         <section id="tab-quiz" class="tab-panel">
           <div class="panel-header">
-            <h2>🎮 능동 연습 퀴즈 · 미니 게임</h2>
-            <p>그림을 보고 글자 타일을 조합하거나 직접 입력하며 실력을 테스트하세요.</p>
+            <h2>🎮 퀴즈 및 미니게임</h2>
+            <p>틀린 문제는 오답노트와 복습필요 목록에 자동 저장됩니다.</p>
           </div>
 
           <div class="sub-tabs">
-            <button class="quiz-mode-btn active" data-qmode="tile">그림 보고 글자 타일 선택</button>
-            <button class="quiz-mode-btn" data-qmode="input">그림 보고 직접 입력</button>
-            <button class="quiz-mode-btn" data-qmode="game">카드 짝맞추기 미니게임</button>
+            <button type="button" class="quiz-mode-btn active" data-qmode="timeattack">⏱️ 4지선다 60초 타임어택</button>
+            <button type="button" class="quiz-mode-btn" data-qmode="tile">🧩 그림·한글 글자타일 선택</button>
+            <button type="button" class="quiz-mode-btn" data-qmode="input">⌨️ 그림 보고 직접 입력</button>
+            <button type="button" class="quiz-mode-btn" data-qmode="memory">🃏 카드 짝 맞추기</button>
           </div>
 
           <div id="quizContainer" class="quiz-container"></div>
         </section>
 
-        <!-- 4. 추후 확장 로드맵 (v2) 탭 -->
-        <section id="tab-roadmap" class="tab-panel">
+        <!-- 4. 문법 탭 -->
+        <section id="tab-grammar" class="tab-panel">
           <div class="panel-header">
-            <h2>🚀 추후 확장 로드맵 (v2: 문법 · 읽기 · 작문)</h2>
-            <p>기초 문자와 품사 어휘를 마스터한 뒤 확장될 단계별 학습 모듈입니다.</p>
+            <h2>📐 기초 문법 학습</h2>
+            <p>명사·い형용사·な형용사·동사의 핵심 문형과 활용 규칙을 익힙니다.</p>
           </div>
-          <div id="roadmapContainer" class="roadmap-grid"></div>
+          <div id="grammarContainer" class="roadmap-grid"></div>
+        </section>
+
+        <!-- 5. 작문 탭 -->
+        <section id="tab-writing_comp" class="tab-panel">
+          <div class="panel-header">
+            <h2>✍️ 읽기 및 작문 연습</h2>
+            <p>한국어 뜻과 힌트를 보고 직접 일본어 문장을 완성해보세요.</p>
+          </div>
+          <div id="writingCompContainer"></div>
         </section>
       </main>
     </div>
 
-    <!-- 모바일 하단 고정 내비게이션 -->
-    <nav class="bottom-nav" aria-label="모바일 하단 메뉴">
-      <button class="nav-btn active" data-tab="dashboard">📊<span>대시보드</span></button>
-      <button class="nav-btn" data-tab="study">📚<span>학습하기</span></button>
-      <button class="nav-btn" data-tab="quiz">🎮<span>퀴즈·게임</span></button>
-      <button class="nav-btn" data-tab="roadmap">🚀<span>문법·작문</span></button>
+    <!-- 모바일 하단 고정 카테고리 탭 (히라가나 / 가타카나 / 명사 / い형용사 / な형용사 / 동사) -->
+    <nav class="mobile-bottom-cats" aria-label="모바일 학습 영역 탭">
+      <button type="button" class="cat-nav-btn active" data-cat="hiragana">
+        <span class="jp-font">あ</span>
+        <span>히라가나</span>
+      </button>
+      <button type="button" class="cat-nav-btn" data-cat="katakana">
+        <span class="jp-font">ア</span>
+        <span>가타카나</span>
+      </button>
+      <button type="button" class="cat-nav-btn" data-cat="noun">
+        <span>📦</span>
+        <span>명사</span>
+      </button>
+      <button type="button" class="cat-nav-btn" data-cat="i_adj">
+        <span class="jp-font">い</span>
+        <span>い형용사</span>
+      </button>
+      <button type="button" class="cat-nav-btn" data-cat="na_adj">
+        <span class="jp-font">な</span>
+        <span>な형용사</span>
+      </button>
+      <button type="button" class="cat-nav-btn" data-cat="verb">
+        <span>⚡</span>
+        <span>동사</span>
+      </button>
     </nav>
   </div>
 
-  <!-- 스크립트 로드 순서 유지 -->
+  <!-- 50음도 문자 상세 정보 팝업 (Modal) -->
+  <div id="charDetailModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modalCharTitle">
+    <div class="modal-card">
+      <button type="button" id="closeCharModalBtn" class="modal-close-btn" aria-label="팝업 닫기">✕</button>
+      <div id="charModalBody"></div>
+    </div>
+  </div>
+
+  <!-- PC 단축키 안내 팝업 -->
+  <div id="shortcutModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="shortcutModalTitle">
+    <div class="modal-card small-modal">
+      <button type="button" id="closeShortcutModalBtn" class="modal-close-btn" aria-label="닫기">✕</button>
+      <h3 id="shortcutModalTitle">⌨️ PC 키보드 단축키 안내</h3>
+      <ul class="shortcut-list">
+        <li><kbd>H</kbd> : 홈(대시보드)으로 이동</li>
+        <li><kbd>1</kbd> ~ <kbd>5</kbd> : 상단 메뉴 전환 (대시보드 / 학습하기 / 퀴즈 / 문법 / 작문)</li>
+        <li><kbd>←</kbd> / <kbd>→</kbd> : 이전 / 다음 문자·카드 이동</li>
+        <li><kbd>Space</kbd> : 플래시카드 뒤집기 / 애니메이션 재생·일시정지</li>
+        <li><kbd>S</kbd> : 현재 문자·단어 TTS 음성 재생</li>
+        <li><kbd>M</kbd> : 뜻 가림 토글 켜기/끄기</li>
+        <li><kbd>F</kbd> : 현재 문자 즐겨찾기 토글</li>
+        <li><kbd>B</kbd> : PC 좌측 사이드바 열기/닫기</li>
+        <li><kbd>Esc</kbd> : 열린 팝업 닫기</li>
+      </ul>
+    </div>
+  </div>
+
   <script src="db.js"></script>
   <script src="data.js"></script>
   <script src="study.js"></script>
