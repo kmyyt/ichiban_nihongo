@@ -1,4 +1,4 @@
-// 메인 컨트롤러: 내비게이션, 단축키, 뜻 가림, TTS, 대시보드·유틸리티(즐겨찾기·오답노트·복습필요·사용법), 문법·작문 관리
+// 메인 컨트롤러: 탭·카테고리 전환, PC 단축키, 뜻 가림, TTS, 대시보드·유틸리티, 문법·작문 관리
 document.addEventListener('DOMContentLoaded', () => {
   let activeTab = 'dashboard';
   let activeCategory = 'hiragana';
@@ -27,12 +27,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== 1. 테마·뜻가림·사이드바 초기화 ====================
   function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    DB.setTheme(theme);
+    const resolved = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', resolved);
+    DB.setTheme(resolved);
     const desktopBtn = document.getElementById('themeToggleDesktop');
     const mobileBtn = document.getElementById('themeToggleMobile');
-    if (desktopBtn) desktopBtn.textContent = theme === 'dark' ? '☀️ 라이트 모드' : '🌙 다크 모드';
-    if (mobileBtn) mobileBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    if (desktopBtn) desktopBtn.textContent = resolved === 'dark' ? '☀️ 라이트 모드' : '🌙 다크 모드';
+    if (mobileBtn) mobileBtn.textContent = resolved === 'dark' ? '☀️' : '🌙';
   }
 
   function toggleTheme() {
@@ -67,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyHideMeaning(e.target.checked);
   });
 
-  // 가려진 뜻(.meaning-mask)을 직접 클릭하면 일시적으로 확인 가능
+  // 가려진 뜻(.meaning-mask)을 클릭하면 일시적으로 확인/토글
   document.addEventListener('click', e => {
     const mask = e.target.closest('.meaning-mask');
     if (mask && document.body.classList.contains('hide-meaning')) {
@@ -90,6 +91,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== 2. 탭 및 카테고리 전환 ====================
   function switchTopTab(tabName) {
+    if (activeTab === 'quiz' && tabName !== 'quiz' && window.QuizModule?.stopTimer) {
+      QuizModule.stopTimer();
+    }
     activeTab = tabName;
     document.querySelectorAll('.top-tab-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === activeTab);
@@ -114,17 +118,14 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshCurrentView();
   }
 
-  // 홈 버튼(헤더 및 사이드바 브랜드) 클릭 시 대시보드로 이동
   document.querySelectorAll('.home-trigger').forEach(el => {
     el.addEventListener('click', () => switchTopTab('dashboard'));
   });
 
-  // 상단 주요 메뉴 탭 클릭
   document.querySelectorAll('.top-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTopTab(btn.dataset.tab));
   });
 
-  // PC 사이드바 & 모바일 하단 카테고리 탭 클릭
   document.querySelectorAll('.cat-nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const moveToStudy = activeTab === 'dashboard' || activeTab === 'grammar' || activeTab === 'writing_comp';
@@ -132,7 +133,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 히라가나 및 일반 카테고리 서브탭 클릭
   document.querySelectorAll('#hiraganaSubTabs .sub-btn, #generalSubTabs .sub-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       StudyModule.setMode(btn.dataset.mode);
@@ -140,7 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 퀴즈 및 미니게임 모드 탭 클릭
   document.querySelectorAll('.quiz-mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.quiz-mode-btn').forEach(b => b.classList.remove('active'));
@@ -155,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const allItems = getAllItems();
     const state = DB.load();
     const stats = DB.getCategoryStats(allItems);
-    const overall = stats[0];
+    const overall = stats[0] || { percent: 0, done: 0, total: 0 };
     const hiraStat = stats.find(s => s.key === 'hiragana') || { percent: 0, done: 0, total: 46 };
     const accuracy = state.quizTotal === 0 ? 0 : Math.round((state.quizSolved / state.quizTotal) * 100);
     const reviewCount = DB.getReviewNeededItems(allItems).length;
@@ -225,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (activeDashUtil === 'favorites') {
       const favItems = state.favorites.map(id => byId.get(id)).filter(Boolean);
       if (!favItems.length) {
-        utilContainer.innerHTML = `<p class="hint-text">아직 즐겨찾기한 문자나 단어가 없습니다. 50음도 타일이나 상세 팝업에서 ☆를 눌러 추가해보세요.</p>`;
+        utilContainer.innerHTML = `<p class="hint-text">아직 즐겨찾기한 문자나 단어가 없습니다. 50음도 타일이나 상세 팝업에서 ☆를 눌러 추가해 보세요.</p>`;
         return;
       }
       utilContainer.innerHTML = `
@@ -295,7 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="util-mini-card">
               <div>
                 <strong class="jp-font" style="font-size:1.25rem;">${item.jp}</strong>
-                <span style="font-size:0.82rem; color:var(--st-hard); margin-left:6px;">${DB.STATUS_LABEL[DB.getStatus(item.id)]}</span>
+                <span style="font-size:0.82rem; color:var(--warning); margin-left:6px;">${DB.STATUS_LABEL[DB.getStatus(item.id)]}</span>
                 <div class="meaning-mask" style="font-size:0.86rem;">${item.romaji} · ${item.meaning}</div>
               </div>
               <button type="button" class="primary-btn rev-study-btn" data-id="${item.id}" data-cat="${item.category}" style="padding:5px 9px; font-size:0.78rem;">복습</button>
@@ -314,10 +313,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (activeDashUtil === 'guide') {
       utilContainer.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:10px; font-size:0.9rem; line-height:1.55;">
-          <div><strong>1. 상단 & 영역 탭:</strong> 상단 메뉴(대시보드, 학습하기, 퀴즈 및 게임, 문법, 작문)와 PC 좌측 사이드바 / 모바일 하단 영역 탭(히라가나, 가타카나, 명사, い형용사, な형용사, 동사)을 조합해 이동할 수 있습니다.</div>
-          <div><strong>2. 히라가나 학습 흐름:</strong> 상단 진도표에서 암기율·즐겨찾기·복습필요를 확인하고, 50음도 타일을 눌러 상세 팝업·플래시카드·정밀 SVG 획순 및 따라쓰기·연상 암기(3지선다)·문자별 단어/예문을 학습하세요.</div>
-          <div><strong>3. 뜻 가림 & TTS:</strong> 상단의 <strong>뜻 가림</strong> 슬라이드로 한국어 뜻을 숨겨 자가 테스트할 수 있으며, <strong>TTS</strong> 버튼으로 일본어 발음을 들을 수 있습니다.</div>
-          <div><strong>4. 퀴즈 & 미니게임:</strong> 4지선다 60초 타임어택, 글자타일 선택, 그림 직접 입력, 카드 짝 맞추기를 즐기면 틀린 문제가 오답노트와 복습필요 목록에 자동 반영됩니다.</div>
+          <div><strong>1. 메뉴 및 영역 이동:</strong> 상단 5개 탭(대시보드·학습하기·퀴즈 및 게임·문법·작문)과 PC 좌측 사이드바 / 모바일 하단 영역 탭으로 이동할 수 있습니다.</div>
+          <div><strong>2. 히라가나 5모드 학습:</strong> 50음도 표·상세 팝업, 플래시카드, 정밀 SVG 획순 및 손글씨 따라쓰기, 연상 암기(3지선다), 문자별 단어·예문을 지원합니다.</div>
+          <div><strong>3. 뜻 가림 & TTS:</strong> 상단 <strong>뜻 가림</strong> 스위치로 뜻을 숨겨 자가 테스트할 수 있고, <strong>TTS</strong> 버튼으로 일본어 발음을 들을 수 있습니다.</div>
+          <div><strong>4. 퀴즈 & 미니게임:</strong> 60초 타임어택, 글자타일 선택, 직접 입력, 카드 짝 맞추기에서 틀린 문제는 오답노트와 복습필요 목록에 자동 반영됩니다.</div>
         </div>
       `;
     }
@@ -379,13 +378,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const ex = exercises[idx];
         const input = el.querySelector(`.comp-input[data-idx="${idx}"]`);
         const fb = document.getElementById(`compFb_${idx}`);
-        const normalize = s => s.replace(/\s+/g, '').trim();
-        if (normalize(input.value) === normalize(ex.answer)) {
-          fb.style.color = 'var(--st-mastered)';
+        const normalize = s => (s || '').replace(/\s+/g, '').trim();
+        if (normalize(input?.value) === normalize(ex.answer)) {
+          fb.style.color = 'var(--success)';
           fb.textContent = `🎉 정확합니다! (${ex.answer} / ${ex.romaji})`;
         } else {
           fb.style.color = 'var(--danger)';
-          fb.textContent = `❌ 다시 시도해보세요. 모범 답안: ${ex.answer} (${ex.romaji})`;
+          fb.textContent = `❌ 다시 시도해 보세요. 모범 답안: ${ex.answer} (${ex.romaji})`;
         }
       });
     });
@@ -414,7 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ==================== 5. 팝업(50음도 상세 / 단축키) & PC 단축키 ====================
+  // ==================== 5. 팝업 & PC 단축키 ====================
   const charModal = document.getElementById('charDetailModal');
   const shortcutModal = document.getElementById('shortcutModal');
 
@@ -435,7 +434,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === shortcutModal) shortcutModal.classList.add('hidden');
   });
 
-  // PC 키보드 단축키 지원
   document.addEventListener('keydown', e => {
     const tag = document.activeElement?.tagName;
     const isTyping = tag === 'INPUT' || tag === 'TEXTAREA';
@@ -449,19 +447,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isTyping) return;
 
     const key = e.key.toLowerCase();
-    if (key === 'h') {
-      switchTopTab('dashboard');
-    } else if (e.key === '1') {
-      switchTopTab('dashboard');
-    } else if (e.key === '2') {
-      switchTopTab('study');
-    } else if (e.key === '3') {
-      switchTopTab('quiz');
-    } else if (e.key === '4') {
-      switchTopTab('grammar');
-    } else if (e.key === '5') {
-      switchTopTab('writing_comp');
-    } else if (e.key === 'ArrowLeft') {
+    if (key === 'h' || e.key === '1') switchTopTab('dashboard');
+    else if (e.key === '2') switchTopTab('study');
+    else if (e.key === '3') switchTopTab('quiz');
+    else if (e.key === '4') switchTopTab('grammar');
+    else if (e.key === '5') switchTopTab('writing_comp');
+    else if (e.key === 'ArrowLeft') {
       if (activeTab === 'study') StudyModule.stepItem(-1);
     } else if (e.key === 'ArrowRight') {
       if (activeTab === 'study') StudyModule.stepItem(1);
@@ -485,7 +476,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 학습 기록 초기화
   document.getElementById('resetProgressBtn')?.addEventListener('click', () => {
     if (confirm('모든 학습 상태, 즐겨찾기, 오답노트, 퀴즈 기록을 초기화할까요?')) {
       DB.resetAll();
@@ -493,14 +483,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 전역 컨트롤러 노출
   window.AppController = {
     refreshDashboard: renderDashboard,
     switchTopTab,
     switchCategory
   };
 
-  // 초기 화면 렌더링
   StudyModule.setCategory(activeCategory);
   renderDashboard();
 });
