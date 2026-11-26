@@ -1,99 +1,279 @@
-// 통합 콘텐츠 DB 허브: 카테고리별 전역 데이터(HIRAGANA_DATA 등)를 통합 제공
-(function (global) {
-  const ROWS = ['あ행', 'か행', 'さ행', 'た행', 'な행', 'は행', 'ま행', 'や행', 'ら행', 'わ행'];
+// LocalStorage 기반 학습 상태·즐겨찾기·오답노트·복습필요·통계 관리 모듈
+const DB = (() => {
+  const STORAGE_KEY = 'jp_master_v2_db_v1';
 
-  const hiraganaItems =
-    global.HIRAGANA_DATA || (typeof HIRAGANA_DATA !== 'undefined' ? HIRAGANA_DATA : []);
-  const katakanaItems =
-    global.KATAKANA_DATA || (typeof KATAKANA_DATA !== 'undefined' ? KATAKANA_DATA : []);
-  const vocabItems =
-    global.VOCAB_DATA || (typeof VOCAB_DATA !== 'undefined' ? VOCAB_DATA : []);
-
-  const items = [
-    ...hiraganaItems,
-    ...katakanaItems,
-    ...vocabItems
-  ];
-
-  const byId = new Map(items.map(item => [item.id, item]));
-
-  const defaultGrammarLessons = [
-    {
-      stage: 'STEP 1 · 명사 문법',
-      title: '기본 긍정·부정·의문 (~です / ~ではありません / ~ですか)',
-      desc: '명사 뒤에 です를 붙여 정중한 서술문을 만들고, ですか를 붙여 질문합니다.',
-      sample: 'わたしは がくせいです。 / こちらは なんですか。'
-    },
-    {
-      stage: 'STEP 2 · 형용사 문법',
-      title: 'い형용사 & な형용사 활용',
-      desc: 'い형용사는 원형 그대로 명사를 꾸미고, な형용사는 명사 앞에서 な를 붙입니다.',
-      sample: 'あかい りんご / しずかな まち'
-    },
-    {
-      stage: 'STEP 3 · 동사 문법',
-      title: '정중형(ます형)과 조사(を·に·へ)',
-      desc: '목적어 뒤에는 を, 이동 목적지 뒤에는 へ 또는 に를 연결합니다.',
-      sample: 'みずを のみます。 / がっこうへ いきます。'
-    }
-  ];
-
-  const defaultWritingExercises = [
-    {
-      ko: '사과를 먹습니다.',
-      hint: 'りんご(사과) + を + たべます(먹습니다)',
-      answer: 'りんごを たべます。',
-      romaji: 'ringo o tabemasu.'
-    },
-    {
-      ko: '고양이가 있습니다.',
-      hint: 'ねこ(고양이) + が + います(있습니다)',
-      answer: 'ねこが います。',
-      romaji: 'neko ga imasu.'
-    },
-    {
-      ko: '하늘이 파랗습니다.',
-      hint: 'そら(하늘) + が + あおいです(파랗습니다)',
-      answer: 'そらが あおいです。',
-      romaji: 'sora ga aoi desu.'
-    }
-  ];
-
-  const grammarLessons =
-    global.GRAMMAR_LESSONS || (typeof GRAMMAR_LESSONS !== 'undefined' ? GRAMMAR_LESSONS : defaultGrammarLessons);
-  const writingExercises =
-    global.WRITING_EXERCISES || (typeof WRITING_EXERCISES !== 'undefined' ? WRITING_EXERCISES : defaultWritingExercises);
-
-  const ContentDB = {
-    items,
-    grammarLessons,
-    writingExercises,
-    getAllItems() {
-      return items;
-    },
-    getById(id) {
-      return byId.get(id) || null;
-    },
-    getByCategory(category) {
-      if (!category || category === 'all') return items;
-      return items.filter(item => item.category === category);
-    },
-    getHiraganaByRow(row) {
-      const hira = items.filter(item => item.category === 'hiragana');
-      if (!row || row === 'all') return hira;
-      return hira.filter(item => item.row === row);
-    },
-    getRows() {
-      return ROWS;
-    }
+  const STATUS = {
+    UNLEARNED: 'unlearned',
+    LEARNING: 'learning',
+    HARD: 'hard',
+    MASTERED: 'mastered'
   };
 
-  const JP_DATA = {
-    items: ContentDB.items,
-    grammarLessons: ContentDB.grammarLessons,
-    writingExercises: ContentDB.writingExercises
+  const STATUS_LABEL = {
+    unlearned: '미학습',
+    learning: '학습중',
+    hard: '어려움',
+    mastered: '암기완료'
   };
 
-  global.ContentDB = ContentDB;
-  global.JP_DATA = JP_DATA;
-})(window);
+  function createDefaultState() {
+    return {
+      theme: 'light',
+      hideMeaning: false,
+      sidebarCollapsed: false,
+      statuses: {},     // { [itemId]: 'unlearned' | 'learning' | 'hard' | 'mastered' }
+      favorites: [],    // [itemId, ...]
+      wrongNotes: {},   // { [itemId]: { id, jp, romaji, meaning, category, wrongCount, lastReason, updatedAt } }
+      quizTotal: 0,
+      quizSolved: 0,
+      gameClears: 0,
+      bestTimeAttackScore: 0
+    };
+  }
+
+  function load() {
+    const base = createDefaultState();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return base;
+      const parsed = JSON.parse(raw);
+      return {
+        ...base,
+        ...parsed,
+        statuses: { ...(parsed.statuses || {}) },
+        favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
+        wrongNotes: { ...(parsed.wrongNotes || {}) }
+      };
+    } catch (e) {
+      console.warn('DB 로드 실패, 기본값 사용:', e);
+      return base;
+    }
+  }
+
+  function save(state) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('DB 저장 실패:', e);
+    }
+  }
+
+  function setTheme(theme) {
+    const st = load();
+    st.theme = theme === 'dark' ? 'dark' : 'light';
+    save(st);
+  }
+
+  function setHideMeaning(hidden) {
+    const st = load();
+    st.hideMeaning = !!hidden;
+    save(st);
+  }
+
+  function setSidebarCollapsed(collapsed) {
+    const st = load();
+    st.sidebarCollapsed = !!collapsed;
+    save(st);
+  }
+
+  function getStatus(id) {
+    const st = load();
+    return st.statuses[id] || STATUS.UNLEARNED;
+  }
+
+  function setStatus(id, nextStatus) {
+    if (!id || !STATUS_LABEL[nextStatus]) return;
+    const st = load();
+    if (nextStatus === STATUS.UNLEARNED) {
+      delete st.statuses[id];
+    } else {
+      st.statuses[id] = nextStatus;
+    }
+    save(st);
+  }
+
+  // '미학습' 상태 항목을 확인/학습했을 때 자동으로 '학습중' 전환 (어려움·암기완료는 유지)
+  function touchItemAsSeen(id) {
+    if (!id) return STATUS.LEARNING;
+    const st = load();
+    const cur = st.statuses[id] || STATUS.UNLEARNED;
+    if (cur === STATUS.UNLEARNED) {
+      st.statuses[id] = STATUS.LEARNING;
+      save(st);
+      return STATUS.LEARNING;
+    }
+    return cur;
+  }
+
+  function isFavorite(id) {
+    const st = load();
+    return st.favorites.includes(id);
+  }
+
+  function toggleFavorite(id) {
+    if (!id) return false;
+    const st = load();
+    const idx = st.favorites.indexOf(id);
+    let active = false;
+    if (idx >= 0) {
+      st.favorites.splice(idx, 1);
+      active = false;
+    } else {
+      st.favorites.push(id);
+      active = true;
+    }
+    save(st);
+    return active;
+  }
+
+  function recordQuiz(isCorrect, item, reason = '퀴즈') {
+    const st = load();
+    st.quizTotal += 1;
+
+    if (isCorrect) {
+      st.quizSolved += 1;
+      if (item && item.id) {
+        const cur = st.statuses[item.id] || STATUS.UNLEARNED;
+        if (cur === STATUS.UNLEARNED) {
+          st.statuses[item.id] = STATUS.LEARNING;
+        }
+      }
+    } else if (item && item.id) {
+      const prev = st.wrongNotes[item.id] || {
+        id: item.id,
+        jp: item.jp,
+        romaji: item.romaji || '',
+        meaning: item.meaning || '',
+        category: item.category || 'hiragana',
+        wrongCount: 0,
+        lastReason: reason,
+        updatedAt: Date.now()
+      };
+      st.wrongNotes[item.id] = {
+        ...prev,
+        jp: item.jp || prev.jp,
+        romaji: item.romaji || prev.romaji,
+        meaning: item.meaning || prev.meaning,
+        category: item.category || prev.category,
+        wrongCount: prev.wrongCount + 1,
+        lastReason: reason,
+        updatedAt: Date.now()
+      };
+
+      // 오답 발생 시 '암기완료'가 아니라면 '어려움'으로 승격해 복습 대상에 포함
+      const curStatus = st.statuses[item.id] || STATUS.UNLEARNED;
+      if (curStatus !== STATUS.MASTERED) {
+        st.statuses[item.id] = STATUS.HARD;
+      }
+    }
+
+    save(st);
+  }
+
+  function removeWrongNote(id) {
+    const st = load();
+    if (st.wrongNotes[id]) {
+      delete st.wrongNotes[id];
+      save(st);
+    }
+  }
+
+  function getWrongNotes() {
+    const st = load();
+    return Object.values(st.wrongNotes).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  function recordGameClear(score = 0, isTimeAttack = false) {
+    const st = load();
+    st.gameClears += 1;
+    if (isTimeAttack && score > (st.bestTimeAttackScore || 0)) {
+      st.bestTimeAttackScore = score;
+    }
+    save(st);
+  }
+
+  // '어려움' 상태이거나 오답노트에 기록된 복습필요 항목 반환
+  function getReviewNeededItems(allItems = []) {
+    const st = load();
+    const wrongIds = new Set(Object.keys(st.wrongNotes));
+    return allItems.filter(item => {
+      const status = st.statuses[item.id] || STATUS.UNLEARNED;
+      return status === STATUS.HARD || wrongIds.has(item.id);
+    });
+  }
+
+  // 전체 및 카테고리별 진도율 계산 (암기완료 1.0, 학습중·어려움 0.5 가중치 반영 + 암기완료 비율 병기 가능)
+  function getCategoryStats(allItems = []) {
+    const st = load();
+    const categories = [
+      { key: 'all', label: '전체 학습' },
+      { key: 'hiragana', label: '히라가나' },
+      { key: 'katakana', label: '가타카나' },
+      { key: 'noun', label: '명사' },
+      { key: 'i_adj', label: 'い형용사' },
+      { key: 'na_adj', label: 'な형용사' },
+      { key: 'verb', label: '동사' }
+    ];
+
+    return categories.map(cat => {
+      const list = cat.key === 'all'
+        ? allItems
+        : allItems.filter(item => item.category === cat.key);
+      const total = list.length;
+      let mastered = 0;
+      let learning = 0;
+      let hard = 0;
+
+      list.forEach(item => {
+        const s = st.statuses[item.id] || STATUS.UNLEARNED;
+        if (s === STATUS.MASTERED) mastered += 1;
+        else if (s === STATUS.LEARNING) learning += 1;
+        else if (s === STATUS.HARD) hard += 1;
+      });
+
+      const weighted = mastered + (learning + hard) * 0.5;
+      const percent = total === 0 ? 0 : Math.round((weighted / total) * 100);
+      const masteredPercent = total === 0 ? 0 : Math.round((mastered / total) * 100);
+
+      return {
+        key: cat.key,
+        label: cat.label,
+        total,
+        done: mastered,
+        learning,
+        hard,
+        percent,
+        masteredPercent
+      };
+    });
+  }
+
+  function resetAll() {
+    const currentTheme = load().theme;
+    const fresh = createDefaultState();
+    fresh.theme = currentTheme;
+    save(fresh);
+  }
+
+  return {
+    STATUS,
+    STATUS_LABEL,
+    load,
+    save,
+    setTheme,
+    setHideMeaning,
+    setSidebarCollapsed,
+    getStatus,
+    setStatus,
+    touchItemAsSeen,
+    isFavorite,
+    toggleFavorite,
+    recordQuiz,
+    removeWrongNote,
+    getWrongNotes,
+    recordGameClear,
+    getReviewNeededItems,
+    getCategoryStats,
+    resetAll
+  };
+})();
