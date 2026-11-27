@@ -7,6 +7,7 @@ const StudyModule = (() => {
   let fcFlipped = false;
   let selectedRow = 'all';
 
+  // SVG 획순 애니메이션 제어 상태
   let strokeAnimTimer = null;
   let strokePaused = false;
   let strokeCurrentStep = 0;
@@ -14,6 +15,7 @@ const StudyModule = (() => {
 
   const ROWS = ['あ행', 'か행', 'さ행', 'た행', 'な행', 'は행', 'ま행', 'や행', 'ら행', 'わ행'];
 
+  // 행별 50음도 표준 5열 슬롯 (빈칸은 null)
   const HIRAGANA_ROWS_SLOTS = [
     { row: 'あ행', slots: ['h_a', 'h_i', 'h_u', 'h_e', 'h_o'] },
     { row: 'か행', slots: ['h_ka', 'h_ki', 'h_ku', 'h_ke', 'h_ko'] },
@@ -26,6 +28,35 @@ const StudyModule = (() => {
     { row: 'ら행', slots: ['h_ra', 'h_ri', 'h_ru', 'h_re', 'h_ro'] },
     { row: 'わ행', slots: ['h_wa', null, 'h_n', null, 'h_wo'] }
   ];
+
+  // 50음도표 전용(isChart = true): 아이콘만 표시 (❌️, ❗️, ✅️, 🔥)
+  // 그 외 화면(isChart = false): ❌ 미학습 / ❗️ 학습중 / ✅ 학습완료 / 🔥 어려움
+  function formatStatusByContext(statusKey, isChart = false) {
+    if (window.DB && typeof window.DB.getStatusDisplay === 'function') {
+      return window.DB.getStatusDisplay(statusKey, isChart);
+    }
+    const fallbackMap = {
+      unlearned: { chart: '❌️', full: '❌ 미학습' },
+      learning:  { chart: '❗️', full: '❗️ 학습중' },
+      hard:      { chart: '🔥', full: '🔥 어려움' },
+      mastered:  { chart: '✅️', full: '✅ 학습완료' }
+    };
+    const entry = fallbackMap[statusKey] || fallbackMap.unlearned;
+    return isChart ? entry.chart : entry.full;
+  }
+
+  function getStatusLabelText(statusKey) {
+    if (window.DB && window.DB.STATUS_LABEL && window.DB.STATUS_LABEL[statusKey]) {
+      return window.DB.STATUS_LABEL[statusKey];
+    }
+    const labels = {
+      unlearned: '미학습',
+      learning: '학습중',
+      hard: '어려움',
+      mastered: '암기완료'
+    };
+    return labels[statusKey] || '미학습';
+  }
 
   function getAllItems() {
     if (window.ContentDB && typeof window.ContentDB.getAllItems === 'function') {
@@ -212,13 +243,13 @@ const StudyModule = (() => {
         <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
           <div>
             <strong>${catTitleMap[category] || '학습 영역'} 진도표</strong>
-            <span class="hint-text"> · 암기완료 ${masteredCount}/${total} (${memorizedPercent}%)</span>
+            <span class="hint-text"> · 학습완료 ${masteredCount}/${total} (${memorizedPercent}%)</span>
           </div>
           <div class="summary-metrics">
-            <span class="metric-pill">🎯 암기율 ${memorizedPercent}%</span>
+            <span class="metric-pill">🎯 완료율 ${memorizedPercent}%</span>
             <span class="metric-pill">⭐ 즐겨찾기 ${favCount}</span>
             <span class="metric-pill">🔁 복습필요 ${reviewCount}</span>
-            <span class="metric-pill">📘 학습중 ${learningCount}</span>
+            <span class="metric-pill">❗️ 학습중 ${learningCount}</span>
           </div>
         </div>
         <div class="progress-bar-bg">
@@ -267,7 +298,7 @@ const StudyModule = (() => {
     }
   }
 
-  // 1. 히라가나 50음도 타일
+  // 1. 히라가나 50음도 타일 (50음도표 전용: 아이콘만 표시 ❌️, ❗️, ✅️, 🔥)
   function renderHiraganaChart(container, onProgressChange) {
     const hiraList = getHiraganaList();
     const mapById = new Map(hiraList.map(item => [item.id, item]));
@@ -287,17 +318,17 @@ const StudyModule = (() => {
             </button>
             <div class="tile-jp jp-font">${item.jp}</div>
             <div class="tile-romaji">${item.romaji} · <span class="meaning-mask">${item.meaning}</span></div>
-            <span class="status-badge status-${st}">${DB.STATUS_LABEL[st]}</span>
+            <span class="chart-status-icon" title="${getStatusLabelText(st)}" aria-label="${getStatusLabelText(st)}">${formatStatusByContext(st, true)}</span>
           </div>
         `;
       }).join('');
     }).join('');
 
     container.innerHTML = `
-      <div class="card">
+      <div class="card gojuon-card">
         <div class="card-title-row">
           <h3>히라가나 50음도</h3>
-          <span class="hint-text">타일을 누르면 상세 팝업이 열리며 '미학습' 문자는 자동으로 '학습중'이 됩니다.</span>
+          <span class="hint-text">❌️ 미학습 · ❗️ 학습중 · ✅️ 학습완료 · 🔥 어려움</span>
         </div>
         <div class="gojuon-grid">${tilesHtml}</div>
       </div>
@@ -323,17 +354,18 @@ const StudyModule = (() => {
 
         const st = DB.getStatus(id);
         tile.className = `char-tile st-${st}`;
-        const badge = tile.querySelector('.status-badge');
-        if (badge) {
-          badge.className = `status-badge status-${st}`;
-          badge.textContent = DB.STATUS_LABEL[st];
+        const iconEl = tile.querySelector('.chart-status-icon');
+        if (iconEl) {
+          iconEl.textContent = formatStatusByContext(st, true);
+          iconEl.setAttribute('title', getStatusLabelText(st));
+          iconEl.setAttribute('aria-label', getStatusLabelText(st));
         }
         if (onProgressChange) onProgressChange();
       });
     });
   }
 
-  // 문자 상세 팝업
+  // 문자 상세 팝업 (그 외 화면: ❌ 미학습 / ❗️ 학습중 / ✅ 학습완료 / 🔥 어려움)
   function openCharDetailModal(id, onProgressChange) {
     const item = getItemById(id);
     const modal = document.getElementById('charDetailModal');
@@ -353,6 +385,7 @@ const StudyModule = (() => {
             <h3 id="modalCharTitle" style="font-size:1.3rem;">
               <span class="jp-font">${item.jp}</span> (${item.romaji}) · <span class="meaning-mask">${item.meaning}</span>
             </h3>
+            <span class="status-badge status-${currentStatus}">${formatStatusByContext(currentStatus, false)}</span>
             <button type="button" class="btn" id="modalSpeakBtn">🔊 발음 듣기</button>
             <button type="button" class="btn" id="modalFavBtn">${isFav ? '★ 즐겨찾기됨' : '☆ 즐겨찾기'}</button>
           </div>
@@ -373,11 +406,14 @@ const StudyModule = (() => {
       <div style="margin-bottom:14px;">
         <strong style="font-size:0.85rem; display:block; margin-bottom:6px;">학습 상태 설정</strong>
         <div class="btn-row" style="justify-content:flex-start;">
-          ${Object.entries(DB.STATUS_LABEL).map(([stKey, label]) => `
-            <button type="button" class="btn status-opt-btn ${currentStatus === stKey ? 'primary' : ''}" data-st="${stKey}">
-              ${label}
-            </button>
-          `).join('')}
+          ${Object.keys(DB.STATUS).map(k => {
+            const stKey = DB.STATUS[k];
+            return `
+              <button type="button" class="btn status-opt-btn ${currentStatus === stKey ? 'primary' : ''}" data-st="${stKey}">
+                ${formatStatusByContext(stKey, false)}
+              </button>
+            `;
+          }).join('')}
         </div>
       </div>
 
@@ -454,13 +490,15 @@ const StudyModule = (() => {
     activeCharId = item.id;
     DB.touchItemAsSeen(item.id);
 
+    const st = DB.getStatus(item.id);
     const sampleWords = (item.words || []).slice(0, 3);
 
     container.innerHTML = `
       <div class="flashcard-wrap">
-        <p class="hint-text" style="text-align:center;">
-          카드 ${fcIndex + 1} / ${items.length} · 앞면은 문자만 표시됩니다. 카드를 눌러 뒷면을 확인하세요.
-        </p>
+        <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
+          <p class="hint-text">카드 ${fcIndex + 1} / ${items.length} · 앞면은 문자만 표시됩니다.</p>
+          <span class="status-badge status-${st}">${formatStatusByContext(st, false)}</span>
+        </div>
 
         <div class="flashcard-box" id="fcCard">
           ${!fcFlipped ? `
@@ -485,9 +523,9 @@ const StudyModule = (() => {
         </div>
 
         <div class="btn-row">
-          <button type="button" class="btn" id="fcHardBtn">어려움</button>
-          <button type="button" class="btn" id="fcLearningBtn">학습중</button>
-          <button type="button" class="btn primary" id="fcMasteredBtn">학습완료</button>
+          <button type="button" class="btn" id="fcHardBtn">${formatStatusByContext(DB.STATUS.HARD, false)}</button>
+          <button type="button" class="btn" id="fcLearningBtn">${formatStatusByContext(DB.STATUS.LEARNING, false)}</button>
+          <button type="button" class="btn primary" id="fcMasteredBtn">${formatStatusByContext(DB.STATUS.MASTERED, false)}</button>
         </div>
 
         <div class="btn-row">
@@ -508,8 +546,8 @@ const StudyModule = (() => {
       speakText(item.jp);
     });
 
-    const markAndNext = st => {
-      DB.setStatus(item.id, st);
+    const markAndNext = nextSt => {
+      DB.setStatus(item.id, nextSt);
       fcIndex = (fcIndex + 1) % items.length;
       fcFlipped = false;
       renderSummaryBanner(currentCategory);
@@ -543,6 +581,7 @@ const StudyModule = (() => {
     activeCharId = item.id;
     DB.touchItemAsSeen(item.id);
 
+    const st = DB.getStatus(item.id);
     const strokes = Array.isArray(item.strokes) && item.strokes.length
       ? item.strokes
       : [{ d: 'M 25 25 L 75 75', tip: '1획: 가이드 문자를 따라 순서대로 써보세요.' }];
@@ -552,7 +591,11 @@ const StudyModule = (() => {
       <div class="card">
         <div class="card-title-row">
           <div>
-            <h3>획순 & 따라쓰기: <span class="jp-font" style="color:var(--accent); font-size:1.5rem;">${item.jp}</span> (${item.romaji} · <span class="meaning-mask">${item.meaning}</span>)</h3>
+            <h3>
+              획순 & 따라쓰기: <span class="jp-font" style="color:var(--accent); font-size:1.5rem;">${item.jp}</span>
+              (${item.romaji} · <span class="meaning-mask">${item.meaning}</span>)
+              <span class="status-badge status-${st}" style="margin-left:6px; vertical-align:middle;">${formatStatusByContext(st, false)}</span>
+            </h3>
             <p class="hint-text" style="margin-top:4px;">${item.pronTip || ''} ${item.mnemonic || ''}</p>
           </div>
           <div class="btn-row">
@@ -729,6 +772,7 @@ const StudyModule = (() => {
     activeCharId = item.id;
     DB.touchItemAsSeen(item.id);
 
+    const st = DB.getStatus(item.id);
     const mq = item.mnemonicQuiz || {
       q: `「${item.jp}」의 발음으로 알맞은 것은?`,
       choices: [`${item.romaji} (${item.meaning})`, 'ka (카)', 'so (소)'],
@@ -739,7 +783,10 @@ const StudyModule = (() => {
     container.innerHTML = `
       <div class="card" style="max-width:640px; margin:0 auto;">
         <div class="card-title-row">
-          <h3>💡 연상 암기법: <span class="jp-font" style="color:var(--accent); font-size:1.5rem;">${item.jp}</span> (${item.romaji})</h3>
+          <h3>
+            💡 연상 암기법: <span class="jp-font" style="color:var(--accent); font-size:1.5rem;">${item.jp}</span> (${item.romaji})
+            <span class="status-badge status-${st}" style="margin-left:6px; vertical-align:middle;">${formatStatusByContext(st, false)}</span>
+          </h3>
           <div class="btn-row">
             <button type="button" class="btn" id="mnPrevBtn">◀ 이전</button>
             <button type="button" class="btn" id="mnNextBtn">다음 ▶</button>
@@ -765,7 +812,7 @@ const StudyModule = (() => {
             ${typeof picked === 'number'
               ? (picked === mq.answer
                 ? '<span style="color:var(--st-mastered-fg);">🎉 정답입니다!</span>'
-                : `<span style="color:#dc2626;">❌ 정답은 "${mq.choices[mq.answer]}" 입니다.</span>`)
+                : `<span style="color:var(--danger);">❌ 정답은 "${mq.choices[mq.answer]}" 입니다.</span>`)
               : ''}
           </div>
         </div>
@@ -801,6 +848,7 @@ const StudyModule = (() => {
     selectedRow = item.row || selectedRow;
     DB.touchItemAsSeen(item.id);
 
+    const st = DB.getStatus(item.id);
     const rows = window.ContentDB?.getRows ? window.ContentDB.getRows() : ROWS;
     const words = item.words || [];
     const examples = item.examples || [];
@@ -817,6 +865,7 @@ const StudyModule = (() => {
           <div>
             <h3 style="font-size:1.35rem;">
               <span class="jp-font" style="color:var(--accent);">${item.jp}</span> (${item.romaji}) · <span class="meaning-mask">${item.meaning}</span>
+              <span class="status-badge status-${st}" style="margin-left:6px; vertical-align:middle;">${formatStatusByContext(st, false)}</span>
             </h3>
             <span class="hint-text">${item.row || ''}</span>
           </div>
@@ -879,6 +928,7 @@ const StudyModule = (() => {
     });
   }
 
+  // 타 카테고리 목록 뷰 (50음도 외 화면: ❌ 미학습 / ❗️ 학습중 / ✅ 학습완료 / 🔥 어려움)
   function renderGeneralList(container, items, onProgressChange) {
     container.innerHTML = `
       <div class="card">
@@ -891,7 +941,7 @@ const StudyModule = (() => {
                 <button type="button" class="tile-fav-btn" data-fav-id="${item.id}">${fav ? '★' : '☆'}</button>
                 <div class="tile-jp jp-font" style="font-size:1.35rem;">${item.emoji ? item.emoji + ' ' : ''}${item.jp}</div>
                 <div class="tile-romaji">${item.romaji} · <span class="meaning-mask"><strong>${item.meaning}</strong></span></div>
-                <span class="status-badge status-${st}">${DB.STATUS_LABEL[st]}</span>
+                <span class="status-badge status-${st}">${formatStatusByContext(st, false)}</span>
               </div>
             `;
           }).join('')}
