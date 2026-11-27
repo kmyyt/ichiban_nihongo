@@ -28,7 +28,7 @@
         </button>
       </div>
 
-      <div class="sidebar-section-label">학습 영역</div>
+      <div class="sidebar-section-label">학습 영역 (독립 워크스페이스)</div>
       <nav class="category-side-nav" aria-label="카테고리 선택">
         <button type="button" class="cat-nav-btn active" data-cat="hiragana">
           <span class="cat-icon jp-font">あ</span>
@@ -59,7 +59,7 @@
       <div class="sidebar-footer">
         <button type="button" id="shortcutHelpBtn" class="utility-btn">⌨️ PC 단축키 안내</button>
         <button type="button" id="themeToggleDesktop" class="utility-btn">🌙 다크 모드</button>
-        <button type="button" id="resetProgressBtn" class="utility-btn danger">🗑️ 학습 기록 초기화</button>
+        <button type="button" id="resetProgressBtn" class="utility-btn danger">🗑️ 현재 영역 기록 초기화</button>
       </div>
     </aside>
 
@@ -68,16 +68,25 @@
       <!-- 상단 통합 헤더 -->
       <header class="top-header">
         <div class="header-top-row">
-          <button type="button" id="headerHomeBtn" class="home-btn home-trigger" title="홈(대시보드)으로 이동 [단축키: H]">
-            <span class="home-icon">🏠</span>
-            <span class="home-title">일본어 학습기</span>
-          </button>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <button type="button" id="headerHomeBtn" class="home-btn home-trigger" title="홈(대시보드)으로 이동 [단축키: H]">
+              <span class="home-icon">🏠</span>
+              <span class="home-title">일본어 학습기</span>
+            </button>
+            <span id="activeAreaBadge" class="active-area-badge">현재 영역: 히라가나</span>
+          </div>
 
           <div class="header-controls">
             <label class="hide-meaning-switch" title="뜻 가림 토글 [단축키: M]">
               <input type="checkbox" id="hideMeaningToggle" />
               <span class="slider-track"></span>
               <span class="slider-label">뜻 가림</span>
+            </label>
+
+            <label class="hide-meaning-switch" title="힌트 가림 토글 [단축키: T]">
+              <input type="checkbox" id="hideHintToggle" />
+              <span class="slider-track"></span>
+              <span class="slider-label">힌트 가림</span>
             </label>
 
             <button type="button" id="quickTtsBtn" class="icon-pill-btn" title="현재 항목 음성 듣기 [단축키: S]">
@@ -105,16 +114,16 @@
         <!-- 1. 홈(대시보드) -->
         <section id="tab-dashboard" class="tab-panel active">
           <div class="panel-header">
-            <h2>📊 학습 대시보드</h2>
-            <p>전체 및 카테고리별 진도율을 확인하고 즐겨찾기·오답노트·복습필요 항목을 빠르게 복습하세요.</p>
+            <h2 id="dashboardTitle">📊 히라가나 대시보드</h2>
+            <p id="dashboardSubtitle">선택한 학습 영역의 진도율, 즐겨찾기, 오답노트, 복습필요 항목을 독립적으로 관리합니다.</p>
           </div>
 
           <div id="dashboardStats" class="stats-grid"></div>
 
           <div class="card">
             <div class="card-title-row">
-              <h3>카테고리별 진도율</h3>
-              <span class="hint-text">카테고리를 클릭하면 학습하기 화면으로 이동합니다</span>
+              <h3>전체 학습 영역별 진도율</h3>
+              <span class="hint-text">영역을 클릭하면 해당 영역의 독립 화면으로 전환됩니다</span>
             </div>
             <div id="categoryProgressList" class="progress-list"></div>
           </div>
@@ -134,9 +143,10 @@
         <section id="tab-study" class="tab-panel">
           <div id="studySummaryBanner" class="study-summary-banner"></div>
 
-          <!-- 히라가나 전용 서브 탭 -->
+          <!-- 히라가나 전용 서브 탭 (심화 50음도 추가) -->
           <div id="hiraganaSubTabs" class="sub-tabs">
             <button type="button" class="sub-btn active" data-mode="chart">🀄 50음도 표</button>
+            <button type="button" class="sub-btn" data-mode="advanced_chart">✨ 심화 50음도</button>
             <button type="button" class="sub-btn" data-mode="flashcard">🗂️ 문자별 플래시카드</button>
             <button type="button" class="sub-btn" data-mode="stroke">✍️ 획순 & 따라쓰기</button>
             <button type="button" class="sub-btn" data-mode="mnemonic">💡 연상 암기법</button>
@@ -156,12 +166,12 @@
         <!-- 3. 퀴즈 및 게임 -->
         <section id="tab-quiz" class="tab-panel">
           <div class="panel-header">
-            <h2>🎮 퀴즈 및 미니게임</h2>
-            <p>틀린 문제는 오답노트와 복습필요 목록에 자동 저장됩니다.</p>
+            <h2 id="quizPanelTitle">🎮 히라가나 퀴즈 및 미니게임</h2>
+            <p>현재 선택된 학습 영역의 데이터만 출제되며, 오답과 점수는 영역별로 따로 저장됩니다.</p>
           </div>
 
           <div class="sub-tabs">
-            <button type="button" class="quiz-mode-btn active" data-qmode="timeattack">⏱️ 4지선다 60초 타임어택</button>
+            <button type="button" class="quiz-mode-btn active" data-qmode="timeattack">⏱️ 4지선다 타임어택</button>
             <button type="button" class="quiz-mode-btn" data-qmode="tile">🧩 그림·한글 글자타일 선택</button>
             <button type="button" class="quiz-mode-btn" data-qmode="input">⌨️ 그림 보고 직접 입력</button>
             <button type="button" class="quiz-mode-btn" data-qmode="memory">🃏 카드 짝 맞추기</button>
@@ -173,8 +183,8 @@
         <!-- 4. 문법 -->
         <section id="tab-grammar" class="tab-panel">
           <div class="panel-header">
-            <h2>📐 기초 문법 학습</h2>
-            <p>명사·い형용사·な형용사·동사의 핵심 문형과 활용 규칙을 익힙니다.</p>
+            <h2 id="grammarPanelTitle">📐 히라가나 문법 · 발음 규칙</h2>
+            <p id="grammarPanelSubtitle">선택한 학습 영역에 맞는 핵심 규칙과 문형을 익힙니다.</p>
           </div>
           <div id="grammarContainer" class="roadmap-grid"></div>
         </section>
@@ -182,8 +192,8 @@
         <!-- 5. 작문 -->
         <section id="tab-writing_comp" class="tab-panel">
           <div class="panel-header">
-            <h2>✍️ 읽기 및 작문 연습</h2>
-            <p>한국어 뜻과 힌트를 보고 직접 일본어 문장을 완성해보세요.</p>
+            <h2 id="writingPanelTitle">✍️ 히라가나 읽기 및 작문 연습</h2>
+            <p>한국어 뜻과 힌트를 보고 일본어 문장을 완성해 보세요. 완료 기록은 영역별로 저장됩니다.</p>
           </div>
           <div id="writingCompContainer"></div>
         </section>
@@ -239,6 +249,7 @@
         <li><kbd>Space</kbd> : 플래시카드 뒤집기 / 획순 애니메이션 재생·일시정지</li>
         <li><kbd>S</kbd> : 현재 항목 TTS 음성 재생</li>
         <li><kbd>M</kbd> : 뜻 가림 토글 켜기/끄기</li>
+        <li><kbd>T</kbd> : 힌트 가림 토글 켜기/끄기</li>
         <li><kbd>F</kbd> : 현재 문자 즐겨찾기 토글</li>
         <li><kbd>B</kbd> : PC 좌측 사이드바 열기/닫기</li>
         <li><kbd>Esc</kbd> : 열린 팝업 닫기</li>
@@ -246,9 +257,10 @@
     </div>
   </div>
 
-  <!-- 1. 분리된 데이터 파일 먼저 로드 (구조 A) -->
+  <!-- 1. 분리된 데이터 파일 먼저 로드 -->
   <script src="data/hiragana.js"></script>
   <script src="data/hiragana-vocab.js"></script>
+  <script src="data/hiragana-advanced.js"></script>
   <script src="data/katakana.js"></script>
   <script src="data/vocab.js"></script>
   <script src="data/grammar.js"></script>
@@ -257,6 +269,7 @@
   <script src="js/db.js"></script>
   <script src="js/data.js"></script>
   <script src="js/listFilter.js"></script>
+
   <!-- 3. 학습·퀴즈·앱 제어 엔진 로드 -->
   <script src="js/study.js"></script>
   <script src="js/quiz.js"></script>
