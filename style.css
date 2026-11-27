@@ -1364,7 +1364,64 @@ kbd {
 .mobile-bottom-cats {
   display: none;
 }
+/* ==================== 4단계: 획순 따라쓰기 스와이프 히라가나 목록 탭 ==================== */
+.kana-swipe-tabs-wrap {
+  margin-bottom: 14px;
+}
 
+.kana-swipe-tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding: 6px 4px 10px;
+}
+
+.kana-swipe-tab {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  scroll-snap-align: center;
+  transition: all 0.16s ease;
+}
+
+.kana-swipe-tab:hover {
+  border-color: var(--accent);
+}
+
+.kana-swipe-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.kana-swipe-tab .tab-jp {
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.kana-swipe-tab .tab-romaji {
+  font-size: 0.68rem;
+  font-weight: 700;
+  opacity: 0.85;
+  line-height: 1.1;
+}
 @media (max-width: 768px) {
   html, body {
     font-size: 13px;
