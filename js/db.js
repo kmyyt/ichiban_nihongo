@@ -1,6 +1,6 @@
-// 사용자 학습 기록·상태·즐겨찾기·오답노트·통계 관리 모듈 (DB)
-(function (global) {
-  const STORAGE_KEY = 'jp_master_db_v3';
+// 학습 상태·진도·퀴즈 기록을 localStorage에 관리하는 DB 모듈
+const DB = (() => {
+  const STORAGE_KEY = 'jp_study_db_v1';
 
   const STATUS = {
     UNLEARNED: 'unlearned',
@@ -9,6 +9,7 @@
     MASTERED: 'mastered'
   };
 
+  // 기존 라벨 유지
   const STATUS_LABEL = {
     [STATUS.UNLEARNED]: '미학습',
     [STATUS.LEARNING]: '학습중',
@@ -16,51 +17,139 @@
     [STATUS.MASTERED]: '암기완료'
   };
 
-  const DEFAULT_STATE = {
-    theme: 'light',
-    hideMeanings: false,
-    sidebarCollapsed: false,
-    statuses: {},     // { [itemId]: 'unlearned' | 'learning' | 'hard' | 'mastered' }
-    favorites: [],    // [itemId, ...]
-    wrongNotes: [],   // [{ id, jp, romaji, meaning, category, mode, wrongCount, lastWrongAt }]
-    quizStats: {
-      totalAnswered: 0,
-      correctCount: 0,
-      bestTimeAttackScore: 0
-    }
+  // 문맥별 상태 표기 설정
+  // 50음도표(isChart = true): 아이콘만 표시 (❌️, ❗️, ✅️, 🔥)
+  // 그 외 화면(isChart = false): ❌ 미학습 / ❗️ 학습중 / ✅ 학습완료 / 🔥 어려움
+  const STATUS_DISPLAY = {
+    [STATUS.UNLEARNED]: { chartIcon: '❌️', icon: '❌', text: '미학습' },
+    [STATUS.LEARNING]:  { chartIcon: '❗️', icon: '❗️', text: '학습중' },
+    [STATUS.HARD]:      { chartIcon: '🔥', icon: '🔥', text: '어려움' },
+    [STATUS.MASTERED]:  { chartIcon: '✅️', icon: '✅', text: '학습완료' }
   };
 
-  let memoryFallback = structuredClone(DEFAULT_STATE);
+  function getStatusDisplay(statusKey, isChart = false) {
+    const key = Object.prototype.hasOwnProperty.call(STATUS_DISPLAY, statusKey)
+      ? statusKey
+      : STATUS.UNLEARNED;
+    const entry = STATUS_DISPLAY[key];
+    return isChart ? entry.chartIcon : `${entry.icon} ${entry.text}`;
+  }
+
+  function getStatusIcon(statusKey, isChart = false) {
+    const key = Object.prototype.hasOwnProperty.call(STATUS_DISPLAY, statusKey)
+      ? statusKey
+      : STATUS.UNLEARNED;
+    const entry = STATUS_DISPLAY[key];
+    return isChart ? entry.chartIcon : entry.icon;
+  }
+
+  function getTodayKey() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function createDefaultState() {
+    return {
+      statuses: {},       // { [itemId]: 'unlearned' | 'learning' | 'hard' | 'mastered' }
+      favorites: [],      // [itemId, ...]
+      lastReviewed: {},   // { [itemId]: timestamp }
+      wrongNotes: [],     // [{ id, itemId, jp, romaji, meaning, reason, timestamp }]
+      quizStats: {
+        totalAttempts: 0,
+        correctCount: 0,
+        gameClears: 0,
+        bestScore: 0
+      },
+      studyLog: {
+        streakDays: 1,
+        lastStudyDate: getTodayKey(),
+        todayCount: 0
+      },
+      preferences: {
+        theme: 'light',
+        hideMeaning: false,
+        sidebarCollapsed: false
+      }
+    };
+  }
+
+  function normalizeState(raw) {
+    const def = createDefaultState();
+    if (!raw || typeof raw !== 'object') return def;
+
+    const merged = {
+      ...def,
+      ...raw,
+      statuses: raw.statuses && typeof raw.statuses === 'object' ? raw.statuses : {},
+      favorites: Array.isArray(raw.favorites) ? raw.favorites : [],
+      lastReviewed: raw.lastReviewed && typeof raw.lastReviewed === 'object' ? raw.lastReviewed : {},
+      wrongNotes: Array.isArray(raw.wrongNotes) ? raw.wrongNotes : [],
+      quizStats: {
+        ...def.quizStats,
+        ...(raw.quizStats && typeof raw.quizStats === 'object' ? raw.quizStats : {})
+      },
+      studyLog: {
+        ...def.studyLog,
+        ...(raw.studyLog && typeof raw.studyLog === 'object' ? raw.studyLog : {})
+      },
+      preferences: {
+        ...def.preferences,
+        ...(raw.preferences && typeof raw.preferences === 'object' ? raw.preferences : {})
+      }
+    };
+
+    const today = getTodayKey();
+    if (merged.studyLog.lastStudyDate !== today) {
+      const prevDate = merged.studyLog.lastStudyDate ? new Date(`${merged.studyLog.lastStudyDate}T00:00:00`) : null;
+      const curDate = new Date(`${today}T00:00:00`);
+      const diffDays = prevDate ? Math.round((curDate - prevDate) / 86400000) : 0;
+
+      if (diffDays === 1) {
+        merged.studyLog.streakDays = (merged.studyLog.streakDays || 0) + 1;
+      } else if (diffDays > 1) {
+        merged.studyLog.streakDays = 1;
+      } else if (!merged.studyLog.streakDays) {
+        merged.studyLog.streakDays = 1;
+      }
+      merged.studyLog.lastStudyDate = today;
+      merged.studyLog.todayCount = 0;
+    }
+
+    return merged;
+  }
 
   function load() {
     try {
-      const raw = global.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return structuredClone(DEFAULT_STATE);
-      const parsed = JSON.parse(raw);
-      return {
-        ...structuredClone(DEFAULT_STATE),
-        ...parsed,
-        statuses: { ...(parsed.statuses || {}) },
-        favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
-        wrongNotes: Array.isArray(parsed.wrongNotes) ? parsed.wrongNotes : [],
-        quizStats: {
-          ...structuredClone(DEFAULT_STATE.quizStats),
-          ...(parsed.quizStats || {})
-        }
-      };
-    } catch (_) {
-      return memoryFallback;
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return createDefaultState();
+      return normalizeState(JSON.parse(raw));
+    } catch (e) {
+      console.warn('DB 불러오기 오류, 기본값으로 복구합니다:', e);
+      return createDefaultState();
     }
   }
 
-  function save(nextState) {
-    memoryFallback = nextState;
+  function save(state) {
     try {
-      global.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-    } catch (_) {
-      // 스토리지 접근 제한 환경 폴백
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('DB 저장 오류:', e);
     }
-    return nextState;
+  }
+
+  function bumpTodayStudy(state, amount = 1) {
+    const today = getTodayKey();
+    if (state.studyLog.lastStudyDate !== today) {
+      state.studyLog.lastStudyDate = today;
+      state.studyLog.todayCount = 0;
+    }
+    state.studyLog.todayCount = (state.studyLog.todayCount || 0) + amount;
+    if (!state.studyLog.streakDays || state.studyLog.streakDays < 1) {
+      state.studyLog.streakDays = 1;
+    }
   }
 
   function getStatus(itemId) {
@@ -68,27 +157,29 @@
     return state.statuses[itemId] || STATUS.UNLEARNED;
   }
 
-  function setStatus(itemId, status) {
-    if (!itemId || !STATUS_LABEL[status]) return load();
+  function setStatus(itemId, nextStatus) {
+    if (!itemId || !Object.values(STATUS).includes(nextStatus)) return;
     const state = load();
-    state.statuses[itemId] = status;
-    return save(state);
+    state.statuses[itemId] = nextStatus;
+    state.lastReviewed[itemId] = Date.now();
+    bumpTodayStudy(state, 1);
+    save(state);
   }
 
-  // '미학습' 상태 문자를 확인했을 때만 '학습중'으로 자동 전환 ('어려움'/'암기완료'는 유지)
   function touchItemAsSeen(itemId) {
-    if (!itemId) return load();
+    if (!itemId) return;
     const state = load();
-    const cur = state.statuses[itemId] || STATUS.UNLEARNED;
-    if (cur === STATUS.UNLEARNED) {
+    state.lastReviewed[itemId] = Date.now();
+    if (!state.statuses[itemId] || state.statuses[itemId] === STATUS.UNLEARNED) {
       state.statuses[itemId] = STATUS.LEARNING;
-      return save(state);
+      bumpTodayStudy(state, 1);
     }
-    return state;
+    save(state);
   }
 
   function isFavorite(itemId) {
-    return load().favorites.includes(itemId);
+    const state = load();
+    return state.favorites.includes(itemId);
   }
 
   function toggleFavorite(itemId) {
@@ -96,133 +187,181 @@
     const state = load();
     const idx = state.favorites.indexOf(itemId);
     let active = false;
-    if (idx === -1) {
-      state.favorites.push(itemId);
-      active = true;
-    } else {
+    if (idx >= 0) {
       state.favorites.splice(idx, 1);
       active = false;
+    } else {
+      state.favorites.push(itemId);
+      active = true;
     }
     save(state);
     return active;
   }
 
-  function recordQuiz(isCorrect, item, modeLabel = '퀴즈') {
+  function recordQuiz(isCorrect, item, reason = '퀴즈 오답') {
     const state = load();
-    state.quizStats.totalAnswered += 1;
-
+    state.quizStats.totalAttempts = (state.quizStats.totalAttempts || 0) + 1;
     if (isCorrect) {
-      state.quizStats.correctCount += 1;
+      state.quizStats.correctCount = (state.quizStats.correctCount || 0) + 1;
       if (item && item.id) {
-        const cur = state.statuses[item.id] || STATUS.UNLEARNED;
-        if (cur === STATUS.UNLEARNED) {
+        state.lastReviewed[item.id] = Date.now();
+        if (state.statuses[item.id] === STATUS.HARD) {
           state.statuses[item.id] = STATUS.LEARNING;
         }
       }
-      return save(state);
-    }
-
-    // 오답 발생 시 '어려움' 상태(암기완료였던 경우도 복습 대상으로 전환) 및 오답노트 기록
-    if (item && item.id) {
-      const cur = state.statuses[item.id] || STATUS.UNLEARNED;
-      if (cur !== STATUS.HARD) {
+    } else if (item && item.id) {
+      state.lastReviewed[item.id] = Date.now();
+      if (state.statuses[item.id] !== STATUS.MASTERED) {
         state.statuses[item.id] = STATUS.HARD;
       }
-
-      const existingIdx = state.wrongNotes.findIndex(w => w.id === item.id);
-      if (existingIdx !== -1) {
-        state.wrongNotes[existingIdx].wrongCount += 1;
-        state.wrongNotes[existingIdx].mode = modeLabel;
-        state.wrongNotes[existingIdx].lastWrongAt = new Date().toISOString();
+      const existingIdx = state.wrongNotes.findIndex(w => w.itemId === item.id);
+      const entry = {
+        id: existingIdx >= 0 ? state.wrongNotes[existingIdx].id : `${item.id}_${Date.now()}`,
+        itemId: item.id,
+        jp: item.jp || '',
+        romaji: item.romaji || '',
+        meaning: item.meaning || '',
+        reason,
+        timestamp: Date.now()
+      };
+      if (existingIdx >= 0) {
+        state.wrongNotes[existingIdx] = entry;
       } else {
-        state.wrongNotes.unshift({
-          id: item.id,
-          jp: item.jp,
-          romaji: item.romaji || '',
-          meaning: item.meaning || '',
-          category: item.category || 'hiragana',
-          mode: modeLabel,
-          wrongCount: 1,
-          lastWrongAt: new Date().toISOString()
-        });
+        state.wrongNotes.unshift(entry);
       }
     }
-
-    return save(state);
-  }
-
-  function updateBestTimeAttackScore(score) {
-    const state = load();
-    if (score > (state.quizStats.bestTimeAttackScore || 0)) {
-      state.quizStats.bestTimeAttackScore = score;
-      save(state);
-    }
+    bumpTodayStudy(state, 1);
+    save(state);
   }
 
   function removeWrongNote(itemId) {
     const state = load();
-    state.wrongNotes = state.wrongNotes.filter(w => w.id !== itemId);
-    return save(state);
+    state.wrongNotes = state.wrongNotes.filter(w => w.itemId !== itemId);
+    save(state);
   }
 
-  // '어려움' 상태 또는 오답노트에 등록된 항목 반환
+  function recordGameClear(score = 0, isTimeAttack = false) {
+    const state = load();
+    state.quizStats.gameClears = (state.quizStats.gameClears || 0) + 1;
+    if (isTimeAttack && typeof score === 'number') {
+      state.quizStats.bestScore = Math.max(state.quizStats.bestScore || 0, score);
+    }
+    bumpTodayStudy(state, 1);
+    save(state);
+  }
+
   function getReviewNeededItems(allItems = []) {
     const state = load();
-    const wrongIds = new Set(state.wrongNotes.map(w => w.id));
+    const now = Date.now();
+    const oneDayMs = 86400000;
+    const wrongSet = new Set(state.wrongNotes.map(w => w.itemId));
+
     return allItems.filter(item => {
       const st = state.statuses[item.id] || STATUS.UNLEARNED;
-      return st === STATUS.HARD || wrongIds.has(item.id);
+      if (st === STATUS.HARD || wrongSet.has(item.id)) return true;
+      if (st === STATUS.LEARNING) {
+        const last = state.lastReviewed[item.id] || 0;
+        return now - last >= oneDayMs;
+      }
+      return false;
     });
   }
 
-  // 카테고리별 진도율 계산 (암기완료 가중치 1.0, 학습중 가중치 0.4, 어려움 가중치 0.2)
-  function getCategoryProgress(items = []) {
-    if (!items.length) {
-      return { total: 0, unlearned: 0, learning: 0, hard: 0, mastered: 0, percent: 0 };
-    }
+  function getProgressSummary(allItems = []) {
     const state = load();
-    let unlearned = 0;
+    const total = allItems.length;
+    let mastered = 0;
     let learning = 0;
     let hard = 0;
-    let mastered = 0;
-    let scoreSum = 0;
+    let unlearned = 0;
 
-    items.forEach(item => {
+    allItems.forEach(item => {
       const st = state.statuses[item.id] || STATUS.UNLEARNED;
-      if (st === STATUS.MASTERED) {
-        mastered += 1;
-        scoreSum += 1;
-      } else if (st === STATUS.HARD) {
-        hard += 1;
-        scoreSum += 0.2;
-      } else if (st === STATUS.LEARNING) {
-        learning += 1;
-        scoreSum += 0.4;
-      } else {
-        unlearned += 1;
-      }
+      if (st === STATUS.MASTERED) mastered += 1;
+      else if (st === STATUS.LEARNING) learning += 1;
+      else if (st === STATUS.HARD) hard += 1;
+      else unlearned += 1;
     });
 
-    const percent = Math.round((scoreSum / items.length) * 100);
+    const accuracy = state.quizStats.totalAttempts > 0
+      ? Math.round((state.quizStats.correctCount / state.quizStats.totalAttempts) * 100)
+      : 0;
+
     return {
-      total: items.length,
-      unlearned,
+      total,
+      mastered,
       learning,
       hard,
-      mastered,
-      percent
+      unlearned,
+      masteredPercent: total > 0 ? Math.round((mastered / total) * 100) : 0,
+      overallPercent: total > 0 ? Math.round(((mastered + (learning + hard) * 0.5) / total) * 100) : 0,
+      favoritesCount: state.favorites.length,
+      wrongCount: state.wrongNotes.length,
+      accuracy,
+      streakDays: state.studyLog.streakDays || 1,
+      todayCount: state.studyLog.todayCount || 0,
+      gameClears: state.quizStats.gameClears || 0,
+      bestScore: state.quizStats.bestScore || 0
     };
   }
 
-  function resetAll() {
-    const fresh = structuredClone(DEFAULT_STATE);
-    fresh.theme = load().theme;
-    return save(fresh);
+  function getCategoryProgress(allItems = []) {
+    const categories = [
+      { key: 'hiragana', label: '히라가나 (50음도)' },
+      { key: 'katakana', label: '가타카나' },
+      { key: 'noun', label: '명사' },
+      { key: 'i_adj', label: 'い형용사' },
+      { key: 'na_adj', label: 'な형용사' },
+      { key: 'verb', label: '동사' }
+    ];
+
+    return categories.map(cat => {
+      const list = allItems.filter(i => i.category === cat.key);
+      const summary = getProgressSummary(list);
+      return {
+        ...cat,
+        ...summary
+      };
+    });
   }
 
-  global.DB = {
+  function getPreferences() {
+    return load().preferences;
+  }
+
+  function updatePreferences(partial = {}) {
+    const state = load();
+    state.preferences = {
+      ...state.preferences,
+      ...partial
+    };
+    save(state);
+    return state.preferences;
+  }
+
+  function exportData() {
+    return JSON.stringify(load(), null, 2);
+  }
+
+  function importData(jsonText) {
+    const parsed = JSON.parse(jsonText);
+    const normalized = normalizeState(parsed);
+    save(normalized);
+    return normalized;
+  }
+
+  function resetAll() {
+    const fresh = createDefaultState();
+    save(fresh);
+    return fresh;
+  }
+
+  return {
     STATUS,
     STATUS_LABEL,
+    STATUS_DISPLAY,
+    getStatusDisplay,
+    getStatusIcon,
     load,
     save,
     getStatus,
@@ -231,10 +370,15 @@
     isFavorite,
     toggleFavorite,
     recordQuiz,
-    updateBestTimeAttackScore,
     removeWrongNote,
+    recordGameClear,
     getReviewNeededItems,
+    getProgressSummary,
     getCategoryProgress,
+    getPreferences,
+    updatePreferences,
+    exportData,
+    importData,
     resetAll
   };
-})(window);
+})();
