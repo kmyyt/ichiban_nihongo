@@ -1,4 +1,4 @@
-// 통합 콘텐츠 DB 허브: 히라가나 기본·확장 팩·심화 규칙 및 카테고리 데이터 통합
+// 통합 콘텐츠 DB 허브: 기본 50음도 + 심화 50음도 + 확장 단어·예문 + 영역별 문법·작문 통합
 (function (global) {
   const ROWS = ['あ행', 'か행', 'さ행', 'た행', 'な행', 'は행', 'ま행', 'や행', 'ら행', 'わ행'];
 
@@ -15,13 +15,12 @@
   function mergeHiraganaWithExtraPack(baseList, extraPack) {
     const list = Array.isArray(baseList) ? baseList : [];
     const pack = extraPack && typeof extraPack === 'object' ? extraPack : {};
-
     return list.map(item => {
       const extra = pack[item.id];
-      if (!extra) return { ...item };
-
+      if (!extra) return { ...item, subType: 'basic' };
       return {
         ...item,
+        subType: 'basic',
         words: [
           ...(Array.isArray(item.words) ? item.words : []),
           ...(Array.isArray(extra.words) ? extra.words : [])
@@ -36,80 +35,36 @@
 
   const rawHiragana = Array.isArray(global.HIRAGANA_DATA) ? global.HIRAGANA_DATA : [];
   const rawExtraPack = global.HIRAGANA_EXTRA_PACK || {};
-  const hiraganaItems = mergeHiraganaWithExtraPack(rawHiragana, rawExtraPack);
+  const hiraganaBasicItems = mergeHiraganaWithExtraPack(rawHiragana, rawExtraPack);
+  const hiraganaAdvancedItems = Array.isArray(global.HIRAGANA_ADVANCED_DATA)
+    ? global.HIRAGANA_ADVANCED_DATA.map(i => ({ ...i, category: 'hiragana' }))
+    : [];
 
   const katakanaItems = Array.isArray(global.KATAKANA_DATA) ? global.KATAKANA_DATA : [];
   const vocabItems = Array.isArray(global.VOCAB_DATA) ? global.VOCAB_DATA : [];
 
-  const advancedRules = Array.isArray(global.HIRAGANA_ADVANCED_RULES)
-    ? global.HIRAGANA_ADVANCED_RULES
-    : [];
-
-  const defaultGrammarLessons = [
-    {
-      stage: '기초 문법 1',
-      title: '명사 서술문 (~です / ~ではありません)',
-      desc: '명사 뒤에 です를 붙여 정중한 문장을 만들고, ですか를 붙여 질문합니다.',
-      sample: 'わたしは がくせいです。 / こちらは なんですか。'
-    },
-    {
-      stage: '기초 문법 2',
-      title: '목적격 조사 を 와 이동 조사 に / へ',
-      desc: '행동의 대상 뒤에는 を, 가는 장소 뒤에는 に 또는 へ를 사용합니다.',
-      sample: 'みずを のみます。 / がっこうへ いきます。'
-    },
-    {
-      stage: '기초 문법 3',
-      title: 'い형용사 · な형용사 명사 수식',
-      desc: 'い형용사는 원형 그대로, な형용사는 な를 붙여 명사를 꾸밉니다.',
-      sample: 'あかい りんご / しずかな まち'
-    }
-  ];
-
-  const defaultWritingExercises = [
-    {
-      ko: '사과를 먹습니다.',
-      hint: 'りんご(사과) + を + たべます(먹습니다)',
-      answer: 'りんごを たべます。',
-      romaji: 'ringo o tabemasu.'
-    },
-    {
-      ko: '고양이가 있습니다.',
-      hint: 'ねこ(고양이) + が + います(있습니다)',
-      answer: 'ねこが います。',
-      romaji: 'neko ga imasu.'
-    },
-    {
-      ko: '하늘이 파랗습니다.',
-      hint: 'そら(하늘) + が + あおいです(파랗습니다)',
-      answer: 'sora ga aoi desu.',
-      romaji: 'sora ga aoi desu.'
-    }
-  ];
-
-  const grammarLessons =
-    Array.isArray(global.GRAMMAR_LESSONS) && global.GRAMMAR_LESSONS.length
-      ? global.GRAMMAR_LESSONS
-      : defaultGrammarLessons;
-
-  const writingExercises =
-    Array.isArray(global.WRITING_EXERCISES) && global.WRITING_EXERCISES.length
-      ? global.WRITING_EXERCISES
-      : defaultWritingExercises;
-
   const items = [
-    ...hiraganaItems,
+    ...hiraganaBasicItems,
+    ...hiraganaAdvancedItems,
     ...katakanaItems,
     ...vocabItems
   ];
 
   const byId = new Map(items.map(item => [item.id, item]));
 
+  const grammarByCategory = global.GRAMMAR_BY_CATEGORY || {
+    hiragana: Array.isArray(global.GRAMMAR_LESSONS) ? global.GRAMMAR_LESSONS : []
+  };
+  const writingByCategory = global.WRITING_BY_CATEGORY || {
+    hiragana: Array.isArray(global.WRITING_EXERCISES) ? global.WRITING_EXERCISES : []
+  };
+
   const ContentDB = {
     items,
-    advancedRules,
-    grammarLessons,
-    writingExercises,
+    hiraganaBasicItems,
+    hiraganaAdvancedItems,
+    grammarByCategory,
+    writingByCategory,
     getAllItems() {
       return items;
     },
@@ -120,29 +75,31 @@
       if (!category || category === 'all') return items;
       return items.filter(item => item.category === category);
     },
-    getHiraganaByRow(row) {
-      const hira = items.filter(item => item.category === 'hiragana');
-      if (!row || row === 'all') return hira;
-      return hira.filter(item => item.row === row);
+    getHiraganaBasic() {
+      return hiraganaBasicItems;
+    },
+    getHiraganaAdvanced(subType = 'all') {
+      if (!subType || subType === 'all') return hiraganaAdvancedItems;
+      return hiraganaAdvancedItems.filter(i => i.subType === subType);
+    },
+    getGrammarByCategory(category) {
+      return grammarByCategory[category] || [];
+    },
+    getWritingByCategory(category) {
+      return writingByCategory[category] || [];
     },
     getRows() {
       return ROWS;
-    },
-    getAdvancedRules() {
-      return advancedRules;
     },
     getCategoryLabel(category) {
       return CATEGORY_LABELS[category] || category;
     }
   };
 
-  const JP_DATA = {
-    items: ContentDB.items,
-    advancedRules: ContentDB.advancedRules,
-    grammarLessons: ContentDB.grammarLessons,
-    writingExercises: ContentDB.writingExercises
-  };
-
   global.ContentDB = ContentDB;
-  global.JP_DATA = JP_DATA;
+  global.JP_DATA = {
+    items: ContentDB.items,
+    grammarLessons: grammarByCategory.hiragana || [],
+    writingExercises: writingByCategory.hiragana || []
+  };
 })(window);
