@@ -1,12 +1,24 @@
-// 퀴즈 및 미니게임 모듈 (1단계: 카드 짝 맞추기 memory 버그 수정 및 안전 가드)
+// 퀴즈 및 미니게임 모듈 (글자타일 단어 비중 상향 + 중복 출제 방지 + 타임어택/직접입력/짝맞추기)
 const QuizModule = (() => {
-  let qMode = 'timeattack';
+  let qMode = 'timeattack'; // 'timeattack' | 'tile' | 'input' | 'memory'
   let currentQuestion = null;
   let mcChoices = [];
   let selectedTiles = [];
   let tilePool = [];
+  let customPool = null;
 
-  // 60초 타임어택 상태
+  // 글자타일 퀴즈 중복 출제 방지용 이력 관리
+  let usedTileQuestionKeys = new Set();
+  let lastTilePoolSignature = '';
+  let tileCycleResetNotice = '';
+
+  // 타임어택 설정 및 상태 (20초 / 30초 / 60초)
+  const DURATION_OPTIONS = [
+    { sec: 20, label: '20초' },
+    { sec: 30, label: '30초' },
+    { sec: 60, label: '1분' }
+  ];
+  let selectedDuration = 60;
   let timeLeft = 60;
   let score = 0;
   let combo = 0;
@@ -16,6 +28,25 @@ const QuizModule = (() => {
   // 메모리 게임 비동기 타이머 관리
   let memoryFlipTimer = null;
 
+  // 타일 보완용 히라가나 은행
+  const KANA_TILE_BANK = [
+    'あ', 'い', 'う', 'え', 'お',
+    'か', 'き', 'く', 'け', 'こ',
+    'さ', 'し', 'す', 'せ', 'そ',
+    'た', 'ち', 'つ', 'て', 'と',
+    'な', 'に', 'ぬ', 'ね', 'の',
+    'は', 'ひ', 'ふ', 'へ', 'ほ',
+    'ま', 'み', 'む', 'め', 'も',
+    'や', 'ゆ', 'よ',
+    'ら', 'り', 'る', 'れ', 'ろ',
+    'わ', 'を', 'ん',
+    'が', 'ぎ', 'ぐ', 'げ', 'ご',
+    'ざ', 'じ', 'ず', 'ぜ', 'ぞ',
+    'だ', 'ぢ', 'づ', 'で', 'ど',
+    'ば', 'び', 'ぶ', 'べ', 'ぼ',
+    'ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ'
+  ];
+
   function clearMemoryTimer() {
     if (memoryFlipTimer) {
       clearTimeout(memoryFlipTimer);
@@ -23,18 +54,64 @@ const QuizModule = (() => {
     }
   }
 
+  function stopTimer() {
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+    timerRunning = false;
+  }
+
   function getAllItems() {
     if (window.ContentDB && typeof window.ContentDB.getAllItems === 'function') {
       const items = window.ContentDB.getAllItems();
-      if (Array.isArray(items)) return items;
+      if (Array.isArray(items)) return items.filter(Boolean);
     }
-    return Array.isArray(window.JP_DATA && window.JP_DATA.items) ? window.JP_DATA.items : [];
+    return Array.isArray(window.JP_DATA && window.JP_DATA.items)
+      ? window.JP_DATA.items.filter(Boolean)
+      : [];
+  }
+
+  function resetTileHistory() {
+    usedTileQuestionKeys = new Set();
+    tileCycleResetNotice = '';
+  }
+
+  function setCustomPool(itemsList) {
+    customPool = Array.isArray(itemsList) && itemsList.length ? [...itemsList] : null;
+    currentQuestion = null;
+    mcChoices = [];
+    selectedTiles = [];
+    tilePool = [];
+    resetTileHistory();
+  }
+
+  function clearCustomPool() {
+    customPool = null;
+    currentQuestion = null;
+    mcChoices = [];
+    selectedTiles = [];
+    tilePool = [];
+    resetTileHistory();
   }
 
   function resolvePool(categoryOrPool) {
-    if (Array.isArray(categoryOrPool)) {
+    if (Array.isArray(categoryOrPool) && categoryOrPool.length) {
       return categoryOrPool.filter(item => item && item.id);
     }
+    if (Array.isArray(customPool) && customPool.length) {
+      return customPool.filter(item => item && item.id);
+    }
+    if (
+      window.ListFilterModule &&
+      typeof window.ListFilterModule.getActivePool === 'function'
+    ) {
+      const filterPool = window.ListFilterModule.getActivePool();
+      if (Array.isArray(filterPool) && filterPool.length) {
+        return filterPool.filter(item => item && item.id);
+      }
+    }
+
     const all = getAllItems().filter(item => item && item.id);
     if (!all.length) return [];
     const category = categoryOrPool;
@@ -45,12 +122,13 @@ const QuizModule = (() => {
     return hiraFallback.length ? hiraFallback : all;
   }
 
-  function stopTimer() {
-    if (timerId) {
-      clearInterval(timerId);
-      timerId = null;
-    }
-    timerRunning = false;
+  function setDuration(sec) {
+    const valid = DURATION_OPTIONS.some(opt => opt.sec === Number(sec));
+    selectedDuration = valid ? Number(sec) : 60;
+    stopTimer();
+    timeLeft = selectedDuration;
+    score = 0;
+    combo = 0;
   }
 
   function setMode(mode) {
@@ -64,7 +142,10 @@ const QuizModule = (() => {
   }
 
   function cleanTarget(jp) {
-    return String(jp || '').replace('(な)', '').trim();
+    return String(jp || '')
+      .replace('(な)', '')
+      .replace(/[。、.\s]/g, '')
+      .trim();
   }
 
   function formatMeaningCard(item) {
@@ -72,6 +153,214 @@ const QuizModule = (() => {
     const meaning = String(item?.meaning || '').trim();
     if (romaji && meaning) return `${romaji} · ${meaning}`;
     return romaji || meaning || cleanTarget(item?.jp) || '학습 카드';
+  }
+
+  // 글자타일 전용: 단어 비중을 크게 높인 문제 후보군 생성
+  function buildTileQuestionCandidates(pool) {
+    const uniqueCandidates = [];
+    const seenKeys = new Set();
+
+    const registerCandidate = (cand, weight) => {
+      const targetJp = cleanTarget(cand.jp);
+      const meaning = String(cand.meaning || '').trim();
+      if (!targetJp || !meaning) return;
+
+      const key = `${targetJp}__${meaning}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+
+      uniqueCandidates.push({
+        ...cand,
+        questionKey: key,
+        jp: targetJp,
+        meaning,
+        weight: Math.max(1, weight)
+      });
+    };
+
+    // 1) 선택된 풀의 words 배열 내 단어를 높은 가중치로 등록
+    pool.forEach(item => {
+      const words = Array.isArray(item.words) ? item.words : [];
+      words.forEach((w, idx) => {
+        const wJp = cleanTarget(w?.jp);
+        const wMeaning = String(w?.meaning || '').trim();
+        if (!wJp || !wMeaning) return;
+
+        registerCandidate(
+          {
+            id: item.id,
+            sourceItem: item,
+            category: item.category,
+            row: item.row,
+            emoji: w.emoji || item.emoji || '📝',
+            meaning: wMeaning,
+            jp: wJp,
+            romaji: w.romaji || item.romaji || '',
+            isWord: true,
+            wordIndex: idx
+          },
+          wJp.length >= 2 ? 7 : 4
+        );
+      });
+    });
+
+    // 2) 선택된 풀의 항목 중 단어(2글자 이상 또는 vocab 카테고리)는 중간 가중치, 단문자는 낮은 가중치로 등록
+    pool.forEach(item => {
+      const iJp = cleanTarget(item.jp);
+      const iMeaning = String(item.meaning || '').trim();
+      if (!iJp || !iMeaning) return;
+
+      const isMultiChar = iJp.length >= 2;
+      const isVocabCategory = ['noun', 'i_adj', 'na_adj', 'verb'].includes(item.category);
+      const weight = isVocabCategory ? 6 : (isMultiChar ? 5 : 1);
+
+      registerCandidate(
+        {
+          id: item.id,
+          sourceItem: item,
+          category: item.category,
+          row: item.row,
+          emoji: item.emoji || (isMultiChar ? '📝' : '🔤'),
+          meaning: iMeaning,
+          jp: iJp,
+          romaji: item.romaji || '',
+          isWord: isMultiChar || isVocabCategory,
+          wordIndex: -1
+        },
+        weight
+      );
+    });
+
+    // 3) 단어 후보가 거의 없으면 전체 항목의 words에서 추가 보완
+    const wordCount = uniqueCandidates.filter(c => c.isWord).length;
+    if (wordCount < 5) {
+      getAllItems().forEach(item => {
+        const words = Array.isArray(item.words) ? item.words : [];
+        words.forEach((w, idx) => {
+          const wJp = cleanTarget(w?.jp);
+          const wMeaning = String(w?.meaning || '').trim();
+          if (!wJp || !wMeaning) return;
+
+          registerCandidate(
+            {
+              id: item.id,
+              sourceItem: item,
+              category: item.category,
+              row: item.row,
+              emoji: w.emoji || item.emoji || '📝',
+              meaning: wMeaning,
+              jp: wJp,
+              romaji: w.romaji || item.romaji || '',
+              isWord: true,
+              wordIndex: idx
+            },
+            4
+          );
+        });
+      });
+    }
+
+    return uniqueCandidates;
+  }
+
+  function pickWeightedCandidate(candidates) {
+    const totalWeight = candidates.reduce((acc, c) => acc + (c.weight || 1), 0);
+    let r = Math.random() * totalWeight;
+    for (const cand of candidates) {
+      r -= (cand.weight || 1);
+      if (r <= 0) return cand;
+    }
+    return candidates[candidates.length - 1];
+  }
+
+  // 글자타일 퀴즈 문제 생성 (중복 출제 방지 적용)
+  function buildTileQuestion(pool) {
+    if (!pool.length) {
+      currentQuestion = null;
+      tilePool = [];
+      selectedTiles = [];
+      return;
+    }
+
+    const poolSig = pool.map(i => i.id).join('|');
+    if (poolSig !== lastTilePoolSignature) {
+      lastTilePoolSignature = poolSig;
+      resetTileHistory();
+    }
+
+    const allCandidates = buildTileQuestionCandidates(pool);
+    if (!allCandidates.length) {
+      currentQuestion = null;
+      tilePool = [];
+      selectedTiles = [];
+      return;
+    }
+
+    let unusedCandidates = allCandidates.filter(c => !usedTileQuestionKeys.has(c.questionKey));
+    if (!unusedCandidates.length) {
+      usedTileQuestionKeys.clear();
+      unusedCandidates = allCandidates;
+      tileCycleResetNotice = '준비된 문제를 모두 풀어서 이력을 초기화하고 새 라운드를 시작했습니다!';
+    } else {
+      tileCycleResetNotice = '';
+    }
+
+    const picked = pickWeightedCandidate(unusedCandidates);
+    usedTileQuestionKeys.add(picked.questionKey);
+
+    const remainingCount = allCandidates.filter(c => !usedTileQuestionKeys.has(c.questionKey)).length;
+    currentQuestion = {
+      ...picked,
+      remainingCount,
+      totalCount: allCandidates.length
+    };
+
+    if (window.DB && typeof window.DB.touchItemAsSeen === 'function') {
+      window.DB.touchItemAsSeen(picked.id);
+    }
+
+    const target = cleanTarget(currentQuestion.jp) || 'あ';
+    const targetChars = target.split('').filter(Boolean);
+
+    const poolChars = pool
+      .flatMap(item => {
+        const base = cleanTarget(item.jp).split('');
+        const subWords = Array.isArray(item.words)
+          ? item.words.flatMap(w => cleanTarget(w?.jp).split(''))
+          : [];
+        return [...base, ...subWords];
+      })
+      .filter(ch => ch && !targetChars.includes(ch));
+
+    const allChars = getAllItems()
+      .flatMap(item => {
+        const base = cleanTarget(item.jp).split('');
+        const subWords = Array.isArray(item.words)
+          ? item.words.flatMap(w => cleanTarget(w?.jp).split(''))
+          : [];
+        return [...base, ...subWords];
+      })
+      .filter(ch => ch && !targetChars.includes(ch));
+
+    const bank = Array.from(
+      new Set([...poolChars, ...allChars, ...KANA_TILE_BANK])
+    ).filter(ch => !targetChars.includes(ch));
+
+    const combined = [...targetChars];
+    const desiredTotal = Math.max(8, targetChars.length + 4);
+    let safety = 0;
+
+    while (combined.length < desiredTotal && safety < 120) {
+      safety += 1;
+      const sourceBank = bank.length ? bank : KANA_TILE_BANK;
+      const candidateChar = sourceBank[Math.floor(Math.random() * sourceBank.length)];
+      if (candidateChar) combined.push(candidateChar);
+    }
+
+    tilePool = combined
+      .map((ch, idx) => ({ id: idx, char: ch, used: false }))
+      .sort(() => Math.random() - 0.5);
+    selectedTiles = [];
   }
 
   function buildUniquePairSource(pool, maxPairs = 6) {
@@ -134,7 +423,10 @@ const QuizModule = (() => {
       window.DB.touchItemAsSeen(targetItem.id);
     }
 
-    const others = pool.filter(i => i.id !== targetItem.id).sort(() => Math.random() - 0.5).slice(0, 3);
+    const others = pool
+      .filter(i => i.id !== targetItem.id)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3);
     const options = [targetItem, ...others].sort(() => Math.random() - 0.5);
     mcChoices = options.map(opt => ({
       id: opt.id,
@@ -143,41 +435,36 @@ const QuizModule = (() => {
     }));
   }
 
-  function buildTileOrInputQuestion(pool) {
+  function buildInputQuestion(pool) {
     if (!pool.length) {
       currentQuestion = null;
-      tilePool = [];
-      selectedTiles = [];
       return;
     }
-    const withEmoji = pool.filter(i => i.emoji || (Array.isArray(i.words) && i.words.some(w => w.emoji)));
+    const withEmoji = pool.filter(
+      i => i.emoji || (Array.isArray(i.words) && i.words.some(w => w.emoji))
+    );
     const candidatePool = withEmoji.length ? withEmoji : pool;
     const rawPicked = candidatePool[Math.floor(Math.random() * candidatePool.length)];
-    const wordWithEmoji = Array.isArray(rawPicked.words) ? rawPicked.words.find(w => w.emoji) : null;
+    const wordWithEmoji = Array.isArray(rawPicked.words)
+      ? rawPicked.words.find(w => w.emoji && cleanTarget(w.jp))
+      : null;
 
     currentQuestion = {
       ...rawPicked,
-      emoji: rawPicked.emoji || (wordWithEmoji ? wordWithEmoji.emoji : '📝'),
-      meaning: rawPicked.emoji ? (rawPicked.meaning || '') : (wordWithEmoji ? (wordWithEmoji.meaning || '') : (rawPicked.meaning || '')),
-      jp: rawPicked.emoji ? (rawPicked.jp || '') : (wordWithEmoji ? (wordWithEmoji.jp || '') : (rawPicked.jp || '')),
-      romaji: rawPicked.emoji ? (rawPicked.romaji || '') : (wordWithEmoji ? (wordWithEmoji.romaji || '') : (rawPicked.romaji || ''))
+      emoji: rawPicked.emoji || (wordWithEmoji ? wordWithEmoji.emoji : '🖼️'),
+      meaning: rawPicked.emoji
+        ? (rawPicked.meaning || '')
+        : (wordWithEmoji ? (wordWithEmoji.meaning || '') : (rawPicked.meaning || '')),
+      jp: rawPicked.emoji
+        ? (rawPicked.jp || '')
+        : (wordWithEmoji ? (wordWithEmoji.jp || '') : (rawPicked.jp || '')),
+      romaji: rawPicked.emoji
+        ? (rawPicked.romaji || '')
+        : (wordWithEmoji ? (wordWithEmoji.romaji || '') : (rawPicked.romaji || ''))
     };
     if (window.DB && typeof window.DB.touchItemAsSeen === 'function') {
       window.DB.touchItemAsSeen(rawPicked.id);
     }
-
-    const target = cleanTarget(currentQuestion.jp);
-    const kanaBank = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'さ', 'し', 'す', 'た', 'ち', 'つ', 'な', 'に', 'の', 'は', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'ん'];
-    const chars = target.split('').filter(Boolean);
-
-    while (chars.length < Math.max(6, target.length + 3)) {
-      chars.push(kanaBank[Math.floor(Math.random() * kanaBank.length)]);
-    }
-
-    tilePool = chars
-      .map((ch, idx) => ({ id: idx, char: ch, used: false }))
-      .sort(() => Math.random() - 0.5);
-    selectedTiles = [];
   }
 
   function render(category, onProgressChange) {
@@ -187,7 +474,7 @@ const QuizModule = (() => {
     const pool = resolvePool(category);
     if (!pool.length) {
       clearMemoryTimer();
-      container.innerHTML = `<div class="card"><p class="hint-text">퀴즈를 출제할 데이터가 없습니다.</p></div>`;
+      container.innerHTML = `<div class="card"><p class="hint-text">퀴즈를 출제할 데이터가 없습니다. 필터 조건을 확인해 주세요.</p></div>`;
       return;
     }
 
@@ -198,12 +485,14 @@ const QuizModule = (() => {
     } else if (qMode === 'tile') {
       stopTimer();
       clearMemoryTimer();
-      if (!currentQuestion || !tilePool.length) buildTileOrInputQuestion(pool);
+      if (!currentQuestion || !tilePool.length || !currentQuestion.questionKey) {
+        buildTileQuestion(pool);
+      }
       renderTileQuiz(container, pool, onProgressChange);
     } else if (qMode === 'input') {
       stopTimer();
       clearMemoryTimer();
-      if (!currentQuestion) buildTileOrInputQuestion(pool);
+      if (!currentQuestion) buildInputQuestion(pool);
       renderInputQuiz(container, pool, onProgressChange);
     } else if (qMode === 'memory') {
       stopTimer();
@@ -211,15 +500,34 @@ const QuizModule = (() => {
     }
   }
 
-  // 1. 4지선다 타임어택
+  function renderDurationSelectorHtml() {
+    return `
+      <div class="btn-row" style="justify-content:flex-start; margin-bottom:10px; gap:6px;" role="group" aria-label="타임어택 제한시간 선택">
+        <span class="hint-text" style="font-weight:700;">⏱️ 제한시간:</span>
+        ${DURATION_OPTIONS.map(opt => `
+          <button
+            type="button"
+            class="btn ta-dur-btn ${selectedDuration === opt.sec ? 'primary' : ''}"
+            data-sec="${opt.sec}"
+            style="padding:5px 10px; font-size:0.76rem;"
+          >${opt.label}</button>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function renderTimeAttack(container, pool, onProgressChange) {
     if (!currentQuestion) return;
-    const pct = Math.max(0, Math.round((timeLeft / 60) * 100));
+    const totalSec = selectedDuration || 60;
+    const shownTime = timerRunning ? Math.max(0, timeLeft) : totalSec;
+    const pct = Math.max(0, Math.min(100, Math.round((shownTime / totalSec) * 100)));
 
     container.innerHTML = `
       <div class="card quiz-box">
-        <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:6px;">
-          <span>⏱️ 남은 시간: <span id="taTimeText">${timeLeft}</span>초</span>
+        ${renderDurationSelectorHtml()}
+
+        <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+          <span>⏱️ 남은 시간: <span id="taTimeText">${shownTime}</span>초 (${totalSec}초 모드)</span>
           <span>점수: <span id="taScoreText">${score}</span>점 · 콤보: <span id="taComboText">${combo}</span></span>
         </div>
 
@@ -227,10 +535,10 @@ const QuizModule = (() => {
           <div class="progress-fill" id="taTimerBar" style="width:${pct}%;"></div>
         </div>
 
-        <div class="jp-font" style="font-size:4.2rem; font-weight:900; margin:12px 0;">
+        <div class="jp-font" style="font-size:4rem; font-weight:900; margin:12px 0;">
           ${currentQuestion.jp || 'あ'}
         </div>
-        <p class="hint-text">알맞은 발음과 뜻을 4지선다에서 고르세요</p>
+        <p class="hint-text">알맞은 발음과 뜻을 4지선다에서 고르세요 (문제 풀: ${pool.length}개)</p>
 
         <div class="choice-grid">
           ${mcChoices.map((c, idx) => `
@@ -241,15 +549,25 @@ const QuizModule = (() => {
         <div id="taFeedback" style="min-height:24px; font-weight:700; margin-top:12px;"></div>
 
         <div class="btn-row" style="margin-top:12px;">
-          <button type="button" class="primary-btn" id="taStartBtn">${timerRunning ? '진행 중...' : '타임어택 시작/재시작'}</button>
+          <button type="button" class="primary-btn" id="taStartBtn">
+            ${timerRunning ? '↺ 재시작' : `▶ ${totalSec}초 타임어택 시작`}
+          </button>
           <button type="button" class="secondary-btn" id="taSpeakBtn">🔊 듣기</button>
         </div>
       </div>
     `;
 
+    container.querySelectorAll('.ta-dur-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setDuration(Number(btn.dataset.sec));
+        buildMultipleChoice(pool);
+        renderTimeAttack(container, pool, onProgressChange);
+      });
+    });
+
     const startCountdown = () => {
       stopTimer();
-      timeLeft = 60;
+      timeLeft = selectedDuration;
       score = 0;
       combo = 0;
       timerRunning = true;
@@ -258,10 +576,13 @@ const QuizModule = (() => {
 
       timerId = setInterval(() => {
         timeLeft -= 1;
+        const safeLeft = Math.max(0, timeLeft);
         const tEl = document.getElementById('taTimeText');
         const bEl = document.getElementById('taTimerBar');
-        if (tEl) tEl.textContent = String(Math.max(0, timeLeft));
-        if (bEl) bEl.style.width = `${Math.max(0, Math.round((timeLeft / 60) * 100))}%`;
+        if (tEl) tEl.textContent = String(safeLeft);
+        if (bEl) {
+          bEl.style.width = `${Math.max(0, Math.round((safeLeft / selectedDuration) * 100))}%`;
+        }
 
         if (timeLeft <= 0) {
           stopTimer();
@@ -272,8 +593,10 @@ const QuizModule = (() => {
           const fb = document.getElementById('taFeedback');
           if (fb) {
             fb.style.color = 'var(--accent)';
-            fb.textContent = `⏰ 시간 종료! 최종 점수: ${score}점`;
+            fb.textContent = `⏰ ${selectedDuration}초 종료! 최종 점수: ${score}점`;
           }
+          const startBtn = document.getElementById('taStartBtn');
+          if (startBtn) startBtn.textContent = `▶ ${selectedDuration}초 타임어택 시작`;
         }
       }, 1000);
     };
@@ -296,7 +619,7 @@ const QuizModule = (() => {
           combo += 1;
           score += 10 + Math.min(20, combo * 2);
           if (window.DB && typeof window.DB.recordQuiz === 'function') {
-            window.DB.recordQuiz(true, currentQuestion, '타임어택');
+            window.DB.recordQuiz(true, currentQuestion, `타임어택(${selectedDuration}초)`);
           }
           if (fb) {
             fb.style.color = 'var(--st-mastered)';
@@ -305,7 +628,7 @@ const QuizModule = (() => {
         } else {
           combo = 0;
           if (window.DB && typeof window.DB.recordQuiz === 'function') {
-            window.DB.recordQuiz(false, currentQuestion, '타임어택 오답');
+            window.DB.recordQuiz(false, currentQuestion, `타임어택(${selectedDuration}초) 오답`);
           }
           if (fb) {
             fb.style.color = 'var(--danger)';
@@ -323,16 +646,32 @@ const QuizModule = (() => {
     });
   }
 
-  // 2. 그림·한국어 보고 글자타일 선택
+  // 2. 그림·한글 보고 히라가나 글자타일 선택 (단어 비중 강화 + 중복 방지)
   function renderTileQuiz(container, pool, onProgressChange) {
     if (!currentQuestion) return;
     const target = cleanTarget(currentQuestion.jp);
+    const total = currentQuestion.totalCount || 1;
+    const remaining = currentQuestion.remainingCount ?? 0;
+    const solved = Math.max(0, total - remaining);
 
     container.innerHTML = `
       <div class="card quiz-box">
-        <div class="quiz-emoji">${currentQuestion.emoji || '📝'}</div>
+        <div class="card-title-row" style="margin-bottom:4px;">
+          <span class="metric-pill">${currentQuestion.isWord ? '📖 단어 중심 출제' : '🔤 문자 출제'}</span>
+          <span class="hint-text">미출제 ${remaining}문제 남음 (${solved}/${total} 완료)</span>
+        </div>
+
+        ${tileCycleResetNotice ? `
+          <div style="margin-bottom:8px; padding:6px 10px; border-radius:8px; background:var(--accent-soft); color:var(--accent); font-size:0.76rem; font-weight:700;">
+            ${tileCycleResetNotice}
+          </div>
+        ` : ''}
+
+        <div class="quiz-emoji">${currentQuestion.emoji || '🖼️'}</div>
         <h3>뜻: <span class="meaning-mask">${currentQuestion.meaning || ''}</span></h3>
-        <p class="hint-text" style="margin-top:4px;">글자 타일을 순서대로 눌러 단어를 완성하세요 (${target.length}글자)</p>
+        <p class="hint-text" style="margin-top:4px;">
+          그림과 한글 뜻을 보고 히라가나 타일을 순서대로 눌러 단어를 완성하세요 (${target.length}글자)
+        </p>
 
         <div class="answer-slots">
           ${Array.from({ length: Math.max(1, target.length) }).map((_, idx) => `
@@ -352,6 +691,7 @@ const QuizModule = (() => {
           <button type="button" class="secondary-btn" id="clearTilesBtn">다시 선택</button>
           <button type="button" class="primary-btn" id="checkTileBtn">정답 확인</button>
           <button type="button" class="secondary-btn" id="nextTileBtn">다음 문제 ▶</button>
+          <button type="button" class="btn" id="resetTileHistoryBtn" style="font-size:0.74rem;">출제 이력 초기화</button>
         </div>
       </div>
     `;
@@ -378,9 +718,10 @@ const QuizModule = (() => {
     document.getElementById('checkTileBtn')?.addEventListener('click', () => {
       const answer = selectedTiles.map(t => t.char).join('');
       const fb = document.getElementById('tileFeedback');
+      const recordTarget = currentQuestion.sourceItem || currentQuestion;
       if (answer === target) {
         if (window.DB && typeof window.DB.recordQuiz === 'function') {
-          window.DB.recordQuiz(true, currentQuestion, '글자타일 퀴즈');
+          window.DB.recordQuiz(true, recordTarget, '글자타일 퀴즈');
         }
         if (fb) {
           fb.style.color = 'var(--st-mastered)';
@@ -388,7 +729,7 @@ const QuizModule = (() => {
         }
       } else {
         if (window.DB && typeof window.DB.recordQuiz === 'function') {
-          window.DB.recordQuiz(false, currentQuestion, '글자타일 퀴즈 오답');
+          window.DB.recordQuiz(false, recordTarget, '글자타일 퀴즈 오답');
         }
         if (fb) {
           fb.style.color = 'var(--danger)';
@@ -399,7 +740,13 @@ const QuizModule = (() => {
     });
 
     document.getElementById('nextTileBtn')?.addEventListener('click', () => {
-      buildTileOrInputQuestion(pool);
+      buildTileQuestion(pool);
+      renderTileQuiz(container, pool, onProgressChange);
+    });
+
+    document.getElementById('resetTileHistoryBtn')?.addEventListener('click', () => {
+      resetTileHistory();
+      buildTileQuestion(pool);
       renderTileQuiz(container, pool, onProgressChange);
     });
   }
@@ -415,7 +762,7 @@ const QuizModule = (() => {
         <h3>뜻: <span class="meaning-mask">${currentQuestion.meaning || ''}</span></h3>
         <p class="hint-text" style="margin-top:4px;">히라가나 또는 로마자(${currentQuestion.romaji || ''})를 직접 입력하세요</p>
 
-        <input type="text" id="directInput" class="quiz-input jp-font" placeholder="예: あめ 또는 ame" autocomplete="off" />
+        <input type="text" id="directInput" class="quiz-input jp-font" placeholder="예: あさ 또는 asa" autocomplete="off" />
         <div id="inputFeedback" style="min-height:24px; font-weight:700; margin-bottom:12px;"></div>
 
         <div class="btn-row">
@@ -457,12 +804,12 @@ const QuizModule = (() => {
     });
 
     document.getElementById('nextInputBtn')?.addEventListener('click', () => {
-      buildTileOrInputQuestion(pool);
+      buildInputQuestion(pool);
       renderInputQuiz(container, pool, onProgressChange);
     });
   }
 
-  // 4. 카드 짝 맞추기 미니게임 (1단계 핵심 수정)
+  // 4. 카드 짝 맞추기 미니게임
   function renderMemoryGame(container, categoryOrPool, onProgressChange) {
     clearMemoryTimer();
     const pool = resolvePool(categoryOrPool);
@@ -583,6 +930,10 @@ const QuizModule = (() => {
 
   return {
     setMode,
+    setDuration,
+    setCustomPool,
+    clearCustomPool,
+    resetTileHistory,
     render,
     stopTimer,
     getActiveSpeakingText
