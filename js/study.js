@@ -7,8 +7,10 @@ const StudyModule = (() => {
   let fcFlipped = false;
   let selectedRow = 'all';
 
-  // SVG 획순 애니메이션 제어 상태
+  // SVG 획순 애니메이션 제어 상태 (5단계: RAF + 타이머 통합 관리)
   let strokeAnimTimer = null;
+  let strokeAnimRafId = null;
+  let strokeAnimSession = 0;
   let strokePaused = false;
   let strokeCurrentStep = 0;
   let mnemonicQuizSelection = {}; // { [itemId]: choiceIdx }
@@ -64,10 +66,61 @@ const StudyModule = (() => {
     return getAllItems().find(item => item.id === id) || null;
   }
 
+  // 5단계 핵심: 다중 서브패스(M ... M ...) 분리 및 유효 경로 정규화
+  function splitSvgSubPaths(d) {
+    const raw = String(d || '').trim();
+    if (!raw) return [];
+    const parts = raw
+      .split(/(?=[Mm]\s*[-+0-9.])/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    return parts.length ? parts : [raw];
+  }
+
+  function normalizeStrokeList(item) {
+    const rawStrokes = Array.isArray(item?.strokes) ? item.strokes : [];
+    const normalized = [];
+
+    rawStrokes.forEach((strokeObj, rawIdx) => {
+      const dStr = typeof strokeObj === 'string' ? strokeObj : strokeObj?.d;
+      const tipStr = typeof strokeObj === 'object' && strokeObj?.tip ? String(strokeObj.tip) : '';
+      const subPaths = splitSvgSubPaths(dStr);
+
+      subPaths.forEach((subD, subIdx) => {
+        const strokeNum = normalized.length + 1;
+        let cleanTip = tipStr.replace(/^\d+\s*획\s*:\s*/u, '').trim();
+        if (!cleanTip) {
+          cleanTip = '화살표 흐름을 따라 부드럽게 이어 그립니다.';
+        } else if (subPaths.length > 1 && subIdx > 0) {
+          cleanTip = `${cleanTip} (이어지는 ${subIdx + 1}번째 선)`;
+        }
+        normalized.push({
+          d: subD,
+          tip: `${strokeNum}획: ${cleanTip}`,
+          rawIndex: rawIdx
+        });
+      });
+    });
+
+    if (!normalized.length) {
+      normalized.push({
+        d: 'M 25 25 L 75 75',
+        tip: '1획: 가이드 문자를 따라 순서대로 써보세요.',
+        rawIndex: 0
+      });
+    }
+    return normalized;
+  }
+
   function stopStrokeAnimation() {
+    strokeAnimSession += 1;
     if (strokeAnimTimer) {
       clearTimeout(strokeAnimTimer);
       strokeAnimTimer = null;
+    }
+    if (strokeAnimRafId) {
+      cancelAnimationFrame(strokeAnimRafId);
+      strokeAnimRafId = null;
     }
     strokePaused = false;
     strokeCurrentStep = 0;
@@ -283,7 +336,7 @@ const StudyModule = (() => {
     }
   }
 
-  // 1. 히라가나 50음도 2차원 그리드 (50음도표 확대 + 아이콘만 표시)
+  // 1. 히라가나 50음도 2차원 그리드 (50음도표 전용: 아이콘만 표시)
   function renderHiraganaChart(container, onProgressChange) {
     const hiraList = getHiraganaList();
     const mapById = new Map(hiraList.map(item => [item.id, item]));
@@ -359,7 +412,7 @@ const StudyModule = (() => {
 
     const currentStatus = DB.getStatus(item.id);
     const isFav = DB.isFavorite(item.id);
-    const strokeCount = Array.isArray(item.strokes) ? item.strokes.length : 1;
+    const normalizedStrokes = normalizeStrokeList(item);
     const sampleWords = (item.words || []).slice(0, 3);
 
     body.innerHTML = `
@@ -374,7 +427,7 @@ const StudyModule = (() => {
             <button type="button" class="btn" id="modalFavBtn">${isFav ? '★ 즐겨찾기됨' : '☆ 즐겨찾기'}</button>
           </div>
           <p class="hint-text" style="margin-top:4px;">
-            ${item.row || ''} · 획순: <strong>${strokeCount}획</strong> · <span class="status-badge status-${currentStatus}">${getStatusDisplay(currentStatus, { chartOnly: false })}</span>
+            ${item.row || ''} · 획순: <strong>${normalizedStrokes.length}획</strong> · <span class="status-badge status-${currentStatus}">${getStatusDisplay(currentStatus, { chartOnly: false })}</span>
           </p>
         </div>
       </div>
@@ -554,7 +607,7 @@ const StudyModule = (() => {
     });
   }
 
-  // 스와이프/스크롤 가능한 히라가나 목록 탭 바 바인딩 (4단계 핵심)
+  // 스와이프/스크롤 가능한 히라가나 목록 탭 바 바인딩
   function attachSwipeableKanaTabs(tabBarEl, items, onSelectItem) {
     if (!tabBarEl) return;
 
@@ -575,7 +628,6 @@ const StudyModule = (() => {
       });
     });
 
-    // 마우스 드래그 스와이프 지원
     let isPointerDown = false;
     let startX = 0;
     let startScrollLeft = 0;
@@ -610,7 +662,6 @@ const StudyModule = (() => {
       }, 0);
     });
 
-    // 터치 좌우 스와이프 제스처로 인접 문자 빠른 전환 지원 (탭 바 영역)
     let touchStartX = 0;
     let touchStartY = 0;
 
@@ -626,7 +677,6 @@ const StudyModule = (() => {
       if (!t) return;
       const dx = t.clientX - touchStartX;
       const dy = t.clientY - touchStartY;
-      // 가로 스크롤 끝에서 강하게 스와이프할 때 이전/다음 문자로 이동
       if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8) {
         const atLeftEdge = tabBarEl.scrollLeft <= 2 && dx > 70;
         const atRightEdge = tabBarEl.scrollLeft + tabBarEl.clientWidth >= tabBarEl.scrollWidth - 2 && dx < -70;
@@ -640,7 +690,7 @@ const StudyModule = (() => {
     }, { passive: true });
   }
 
-  // 3. 획순 & 따라쓰기 (스와이프 가능한 히라가나 문자 목록 탭 포함)
+  // 3. 획순 & 따라쓰기 (5단계: 정밀 SVG 획순 분리·길이 기반 애니메이션 + 시작점 번호 마커)
   function renderStrokeAndTrace(container, items, onProgressChange) {
     if (!items.length) return;
     const item = getItemById(activeCharId) || items[0];
@@ -650,9 +700,7 @@ const StudyModule = (() => {
     fcIndex = Math.max(0, items.findIndex(i => i.id === item.id));
     DB.touchItemAsSeen(item.id);
 
-    const strokes = Array.isArray(item.strokes) && item.strokes.length
-      ? item.strokes
-      : [{ d: 'M 25 25 L 75 75', tip: '1획: 가이드 문자를 따라 순서대로 써보세요.' }];
+    const strokes = normalizeStrokeList(item);
     const isFav = DB.isFavorite(item.id);
     const st = DB.getStatus(item.id);
     const hiraTabsSource = currentCategory === 'hiragana' ? getHiraganaList() : items;
@@ -702,8 +750,11 @@ const StudyModule = (() => {
           <div class="stroke-box">
             <strong style="font-size:0.88rem;">정밀 SVG 획순 애니메이션 (${strokes.length}획)</strong>
             <svg id="strokeSvg" class="stroke-svg" viewBox="0 0 100 100" aria-label="${item.jp} 획순 가이드">
+              <line x1="50" y1="6" x2="50" y2="94" stroke="var(--border)" stroke-width="0.8" stroke-dasharray="3 3" />
+              <line x1="6" y1="50" x2="94" y2="50" stroke="var(--border)" stroke-width="0.8" stroke-dasharray="3 3" />
               ${strokes.map(s => `<path class="stroke-path-bg" d="${s.d}"></path>`).join('')}
               ${strokes.map((s, i) => `<path class="stroke-path-anim" id="animStroke_${i}" d="${s.d}"></path>`).join('')}
+              <g id="strokeStartMarkers"></g>
             </svg>
             <div class="btn-row">
               <button type="button" class="btn primary" id="playStrokeBtn">재생</button>
@@ -759,10 +810,16 @@ const StudyModule = (() => {
     document.getElementById('strokePrevBtn')?.addEventListener('click', () => stepItem(-1));
     document.getElementById('strokeNextBtn')?.addEventListener('click', () => stepItem(1));
 
+    renderStrokeStartMarkers(strokes.length);
     setupStrokeAnimation(strokes.length);
+
     document.getElementById('playStrokeBtn')?.addEventListener('click', () => {
-      if (strokePaused) resumeStrokeAnimation();
-      else playStrokeAnimation(strokes.length, 0);
+      if (strokePaused) {
+        resumeStrokeAnimation();
+      } else {
+        stopStrokeAnimation();
+        playStrokeAnimation(strokes.length, 0);
+      }
     });
     document.getElementById('pauseStrokeBtn')?.addEventListener('click', pauseStrokeAnimation);
     document.getElementById('restartStrokeBtn')?.addEventListener('click', () => {
@@ -818,51 +875,120 @@ const StudyModule = (() => {
     playStrokeAnimation(strokes.length, 0);
   }
 
+  // 각 획 시작점(getPointAtLength(0))에 1, 2, 3... 시작 번호 표시
+  function renderStrokeStartMarkers(count) {
+    const markerLayer = document.getElementById('strokeStartMarkers');
+    if (!markerLayer) return;
+    let html = '';
+
+    for (let i = 0; i < count; i += 1) {
+      const pathEl = document.getElementById(`animStroke_${i}`);
+      if (!pathEl || typeof pathEl.getPointAtLength !== 'function') continue;
+      try {
+        const pt = pathEl.getPointAtLength(0);
+        const cx = Math.min(92, Math.max(8, pt.x));
+        const cy = Math.min(92, Math.max(8, pt.y));
+        html += `
+          <g class="stroke-marker" data-marker-idx="${i}">
+            <circle cx="${cx}" cy="${cy}" r="5.5" fill="var(--accent)" stroke="#ffffff" stroke-width="1.2"></circle>
+            <text x="${cx}" y="${cy + 2.3}" text-anchor="middle" font-size="6.5" font-weight="800" fill="#ffffff">${i + 1}</text>
+          </g>
+        `;
+      } catch (e) {
+        // 유효하지 않은 경로 방어
+      }
+    }
+    markerLayer.innerHTML = html;
+  }
+
+  function getSafePathLength(pathEl) {
+    if (!pathEl || typeof pathEl.getTotalLength !== 'function') return 160;
+    try {
+      const len = pathEl.getTotalLength();
+      return Number.isFinite(len) && len > 0 ? Math.ceil(len) + 2 : 160;
+    } catch (e) {
+      return 160;
+    }
+  }
+
   function setupStrokeAnimation(count) {
     for (let i = 0; i < count; i += 1) {
       const el = document.getElementById(`animStroke_${i}`);
       if (!el) continue;
-      const len = el.getTotalLength ? el.getTotalLength() : 160;
-      el.style.strokeDasharray = `${len}`;
-      el.style.strokeDashoffset = `${len}`;
+      const len = getSafePathLength(el);
+      el.dataset.pathLen = String(len);
       el.style.transition = 'none';
+      el.style.strokeDasharray = `${len} ${len}`;
+      el.style.strokeDashoffset = `${len}`;
+      el.style.opacity = '0';
+      // 강제 리플로우로 초기 dashoffset 상태를 브라우저에 확정
+      el.getBoundingClientRect();
     }
   }
 
   function pauseStrokeAnimation() {
+    strokeAnimSession += 1;
     if (strokeAnimTimer) {
       clearTimeout(strokeAnimTimer);
       strokeAnimTimer = null;
+    }
+    if (strokeAnimRafId) {
+      cancelAnimationFrame(strokeAnimRafId);
+      strokeAnimRafId = null;
     }
     strokePaused = true;
   }
 
   function resumeStrokeAnimation() {
     const item = getItemById(activeCharId);
-    const total = (item && item.strokes && item.strokes.length) || 1;
+    const total = normalizeStrokeList(item).length;
     strokePaused = false;
     playStrokeAnimation(total, strokeCurrentStep);
   }
 
   function playStrokeAnimation(total, startIdx) {
-    if (startIdx === 0) setupStrokeAnimation(total);
+    if (startIdx === 0) {
+      setupStrokeAnimation(total);
+    }
     strokePaused = false;
+    const sessionToken = ++strokeAnimSession;
 
     const runStep = idx => {
+      if (sessionToken !== strokeAnimSession || strokePaused) return;
       strokeCurrentStep = idx;
       if (idx >= total) {
         strokeAnimTimer = null;
         return;
       }
+
       const el = document.getElementById(`animStroke_${idx}`);
-      if (el) {
-        el.style.transition = 'stroke-dashoffset 0.65s ease-in-out';
-        el.style.strokeDashoffset = '0';
+      if (!el) {
+        strokeAnimTimer = setTimeout(() => runStep(idx + 1), 100);
+        return;
       }
-      strokeAnimTimer = setTimeout(() => runStep(idx + 1), 750);
+
+      const len = Number(el.dataset.pathLen) || getSafePathLength(el);
+      const durationMs = Math.min(900, Math.max(420, Math.round(len * 4.5)));
+
+      el.style.transition = 'none';
+      el.style.strokeDasharray = `${len} ${len}`;
+      el.style.strokeDashoffset = `${len}`;
+      el.style.opacity = '1';
+      el.getBoundingClientRect();
+
+      strokeAnimRafId = requestAnimationFrame(() => {
+        if (sessionToken !== strokeAnimSession || strokePaused) return;
+        el.style.transition = `stroke-dashoffset ${durationMs}ms cubic-bezier(0.25, 0.8, 0.25, 1)`;
+        el.style.strokeDashoffset = '0';
+
+        strokeAnimTimer = setTimeout(() => {
+          if (sessionToken !== strokeAnimSession || strokePaused) return;
+          runStep(idx + 1);
+        }, durationMs + 140);
+      });
     };
 
-    runStep(startIdx);
+    strokeAnimRafId = requestAnimationFrame(() => runStep(startIdx));
   }
 
   // 4. 연상 암기법 + 3지선다 확인 문제
