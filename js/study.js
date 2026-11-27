@@ -1,4 +1,4 @@
-// 히라가나 심화 학습 및 카테고리별 학습 모듈 (StudyModule)
+// 히라가나 심화 학습 및 카테고리별 학습 모듈 (StudyModule — 3~6단계 통합 전체 코드)
 const StudyModule = (() => {
   let currentCategory = 'hiragana';
   let currentMode = 'chart'; // 'chart' | 'flashcard' | 'stroke' | 'mnemonic' | 'examples'
@@ -31,7 +31,7 @@ const StudyModule = (() => {
     { row: 'わ행', slots: ['h_wa', null, 'h_n', null, 'h_wo'] }
   ];
 
-  // 50음도표 전용(아이콘만) vs 그 외 화면(이모지 + 상태명) 표기 헬퍼
+  // 3단계: 50음도표 전용(아이콘만) vs 그 외 화면(이모지 + 상태명) 표기 헬퍼
   function getStatusDisplay(statusKey, { chartOnly = false } = {}) {
     const st = statusKey || DB.STATUS.UNLEARNED;
     const map = {
@@ -66,7 +66,7 @@ const StudyModule = (() => {
     return getAllItems().find(item => item.id === id) || null;
   }
 
-  // 5단계 핵심: 다중 서브패스(M ... M ...) 분리 및 유효 경로 정규화
+  // 5단계: 다중 서브패스(M ... M ...) 분리 및 유효 경로 정규화
   function splitSvgSubPaths(d) {
     const raw = String(d || '').trim();
     if (!raw) return [];
@@ -336,7 +336,7 @@ const StudyModule = (() => {
     }
   }
 
-  // 1. 히라가나 50음도 2차원 그리드 (50음도표 전용: 아이콘만 표시)
+  // 1. 히라가나 50음도 2차원 그리드 (3단계: 50음도표 전용 아이콘만 표시)
   function renderHiraganaChart(container, onProgressChange) {
     const hiraList = getHiraganaList();
     const mapById = new Map(hiraList.map(item => [item.id, item]));
@@ -607,7 +607,7 @@ const StudyModule = (() => {
     });
   }
 
-  // 스와이프/스크롤 가능한 히라가나 목록 탭 바 바인딩
+  // 4단계: 스와이프/스크롤 가능한 히라가나 목록 탭 바 바인딩
   function attachSwipeableKanaTabs(tabBarEl, items, onSelectItem) {
     if (!tabBarEl) return;
 
@@ -690,7 +690,7 @@ const StudyModule = (() => {
     }, { passive: true });
   }
 
-  // 3. 획순 & 따라쓰기 (5단계: 정밀 SVG 획순 분리·길이 기반 애니메이션 + 시작점 번호 마커)
+  // 3. 획순 & 따라쓰기 (4단계 스와이프 탭 + 5단계 정밀 SVG 획순 애니메이션 & 시작점 번호 마커)
   function renderStrokeAndTrace(container, items, onProgressChange) {
     if (!items.length) return;
     const item = getItemById(activeCharId) || items[0];
@@ -875,7 +875,6 @@ const StudyModule = (() => {
     playStrokeAnimation(strokes.length, 0);
   }
 
-  // 각 획 시작점(getPointAtLength(0))에 1, 2, 3... 시작 번호 표시
   function renderStrokeStartMarkers(count) {
     const markerLayer = document.getElementById('strokeStartMarkers');
     if (!markerLayer) return;
@@ -921,7 +920,6 @@ const StudyModule = (() => {
       el.style.strokeDasharray = `${len} ${len}`;
       el.style.strokeDashoffset = `${len}`;
       el.style.opacity = '0';
-      // 강제 리플로우로 초기 dashoffset 상태를 브라우저에 확정
       el.getBoundingClientRect();
     }
   }
@@ -991,7 +989,7 @@ const StudyModule = (() => {
     strokeAnimRafId = requestAnimationFrame(() => runStep(startIdx));
   }
 
-  // 4. 연상 암기법 + 3지선다 확인 문제
+  // 4. 연상 암기법 + 3지선다 확인 문제 + 히라가나 심화 규칙 정리 (6단계)
   function renderMnemonicTab(container, items, onProgressChange) {
     if (!items.length) return;
     const item = getItemById(activeCharId) || items[0];
@@ -1006,9 +1004,12 @@ const StudyModule = (() => {
       answer: 0
     };
     const picked = mnemonicQuizSelection[item.id];
+    const rules = (window.ContentDB && typeof window.ContentDB.getAdvancedRules === 'function')
+      ? window.ContentDB.getAdvancedRules()
+      : (window.HIRAGANA_ADVANCED_RULES || []);
 
     container.innerHTML = `
-      <div class="card" style="max-width:640px; margin:0 auto;">
+      <div class="card" style="max-width:720px; margin:0 auto;">
         <div class="card-title-row">
           <h3>💡 연상 암기법: <span class="jp-font" style="color:var(--accent); font-size:1.5rem;">${item.jp}</span> (${item.romaji})</h3>
           <div class="btn-row">
@@ -1022,7 +1023,7 @@ const StudyModule = (() => {
           <strong>🎨 모양·발음 연상 스토리:</strong> ${item.mnemonic || ''}
         </div>
 
-        <div style="border-top:1px solid var(--border); padding-top:14px;">
+        <div style="border-top:1px solid var(--border); padding-top:14px; margin-bottom:18px;">
           <strong style="display:block; margin-bottom:8px;">이해도 확인 (3지선다)</strong>
           <p style="margin-bottom:10px;">${mq.q}</p>
           <div style="display:flex; flex-direction:column; gap:8px;">
@@ -1038,6 +1039,27 @@ const StudyModule = (() => {
                 ? '<span style="color:var(--st-mastered-fg);">🎉 정답입니다!</span>'
                 : `<span style="color:#dc2626;">❌ 정답은 "${mq.choices[mq.answer]}" 입니다.</span>`)
               : ''}
+          </div>
+        </div>
+
+        <div style="border-top:1px solid var(--border); padding-top:16px;">
+          <div class="card-title-row" style="margin-bottom:8px;">
+            <h3>📚 히라가나 심화 규칙 정리</h3>
+            <span class="hint-text">탁음 · 반탁음 · 요음 · 특수발음 · 장음</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            ${rules.map(rule => `
+              <div style="padding:12px 14px; border-radius:12px; background:var(--bg-elevated); border:1px solid var(--border);">
+                <div style="font-size:0.74rem; font-weight:700; color:var(--accent); margin-bottom:2px;">${rule.badge}</div>
+                <strong style="display:block; margin-bottom:4px;">${rule.title}</strong>
+                <p class="hint-text" style="margin-bottom:8px;">${rule.summary}</p>
+                <div style="display:flex; flex-direction:column; gap:4px; font-size:0.82rem;">
+                  ${(rule.items || []).map(row => `
+                    <div><strong>• ${row.pair}:</strong> <span class="jp-font">${row.example}</span></div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
           </div>
         </div>
       </div>
