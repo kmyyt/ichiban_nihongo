@@ -1,4 +1,4 @@
-// 통합 콘텐츠 DB 허브 (구조 A: 히라가나 기본 데이터 + 단어·예문 확장 팩 병합 및 카테고리 통합)
+// 통합 콘텐츠 DB 허브: 히라가나 기본·확장 팩·심화 규칙 및 카테고리 데이터 통합
 (function (global) {
   const ROWS = ['あ행', 'か행', 'さ행', 'た행', 'な행', 'は행', 'ま행', 'や행', 'ら행', 'わ행'];
 
@@ -20,20 +20,16 @@
       const extra = pack[item.id];
       if (!extra) return { ...item };
 
-      const mergedWords = [
-        ...(Array.isArray(item.words) ? item.words : []),
-        ...(Array.isArray(extra.words) ? extra.words : [])
-      ];
-
-      const mergedExamples = [
-        ...(Array.isArray(item.examples) ? item.examples : []),
-        ...(Array.isArray(extra.examples) ? extra.examples : [])
-      ];
-
       return {
         ...item,
-        words: mergedWords,
-        examples: mergedExamples
+        words: [
+          ...(Array.isArray(item.words) ? item.words : []),
+          ...(Array.isArray(extra.words) ? extra.words : [])
+        ],
+        examples: [
+          ...(Array.isArray(item.examples) ? item.examples : []),
+          ...(Array.isArray(extra.examples) ? extra.examples : [])
+        ]
       };
     });
   }
@@ -44,6 +40,10 @@
 
   const katakanaItems = Array.isArray(global.KATAKANA_DATA) ? global.KATAKANA_DATA : [];
   const vocabItems = Array.isArray(global.VOCAB_DATA) ? global.VOCAB_DATA : [];
+
+  const advancedRules = Array.isArray(global.HIRAGANA_ADVANCED_RULES)
+    ? global.HIRAGANA_ADVANCED_RULES
+    : [];
 
   const defaultGrammarLessons = [
     {
@@ -82,7 +82,7 @@
     {
       ko: '하늘이 파랗습니다.',
       hint: 'そら(하늘) + が + あおいです(파랗습니다)',
-      answer: 'そらが あおいです。',
+      answer: 'sora ga aoi desu.',
       romaji: 'sora ga aoi desu.'
     }
   ];
@@ -107,6 +107,7 @@
 
   const ContentDB = {
     items,
+    advancedRules,
     grammarLessons,
     writingExercises,
     getAllItems() {
@@ -127,6 +128,9 @@
     getRows() {
       return ROWS;
     },
+    getAdvancedRules() {
+      return advancedRules;
+    },
     getCategoryLabel(category) {
       return CATEGORY_LABELS[category] || category;
     }
@@ -134,6 +138,7 @@
 
   const JP_DATA = {
     items: ContentDB.items,
+    advancedRules: ContentDB.advancedRules,
     grammarLessons: ContentDB.grammarLessons,
     writingExercises: ContentDB.writingExercises
   };
