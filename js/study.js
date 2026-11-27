@@ -1,4 +1,4 @@
-// 히라가나 심화 학습 및 카테고리별 학습 모듈 (StudyModule — 3~6단계 통합 전체 코드)
+// 히라가나 심화 학습 및 카테고리별 학습 모듈 (StudyModule)
 const StudyModule = (() => {
   let currentCategory = 'hiragana';
   let currentMode = 'chart'; // 'chart' | 'flashcard' | 'stroke' | 'mnemonic' | 'examples'
@@ -6,18 +6,17 @@ const StudyModule = (() => {
   let fcIndex = 0;
   let fcFlipped = false;
   let selectedRow = 'all';
+  let customPool = null; // 7단계: 필터로 지정된 항목 배열
 
-  // SVG 획순 애니메이션 제어 상태 (5단계: RAF + 타이머 통합 관리)
   let strokeAnimTimer = null;
   let strokeAnimRafId = null;
   let strokeAnimSession = 0;
   let strokePaused = false;
   let strokeCurrentStep = 0;
-  let mnemonicQuizSelection = {}; // { [itemId]: choiceIdx }
+  let mnemonicQuizSelection = {};
 
   const ROWS = ['あ행', 'か행', 'さ행', 'た행', 'な행', 'は행', 'ま행', 'や행', 'ら행', 'わ행'];
 
-  // 행별 50음도 표준 5열 슬롯 (빈칸은 null)
   const HIRAGANA_ROWS_SLOTS = [
     { row: 'あ행', slots: ['h_a', 'h_i', 'h_u', 'h_e', 'h_o'] },
     { row: 'か행', slots: ['h_ka', 'h_ki', 'h_ku', 'h_ke', 'h_ko'] },
@@ -31,7 +30,6 @@ const StudyModule = (() => {
     { row: 'わ행', slots: ['h_wa', null, 'h_n', null, 'h_wo'] }
   ];
 
-  // 3단계: 50음도표 전용(아이콘만) vs 그 외 화면(이모지 + 상태명) 표기 헬퍼
   function getStatusDisplay(statusKey, { chartOnly = false } = {}) {
     const st = statusKey || DB.STATUS.UNLEARNED;
     const map = {
@@ -56,6 +54,9 @@ const StudyModule = (() => {
   }
 
   function getItemsByCategory(category) {
+    if (Array.isArray(customPool) && customPool.length) {
+      return customPool;
+    }
     const all = getAllItems();
     if (!category || category === 'all') return all;
     return all.filter(item => item.category === category);
@@ -66,7 +67,22 @@ const StudyModule = (() => {
     return getAllItems().find(item => item.id === id) || null;
   }
 
-  // 5단계: 다중 서브패스(M ... M ...) 분리 및 유효 경로 정규화
+  function setFilteredPool(itemsList, targetId = null) {
+    customPool = Array.isArray(itemsList) && itemsList.length ? [...itemsList] : null;
+    if (customPool && targetId) {
+      activeCharId = targetId;
+      const foundIdx = customPool.findIndex(i => i.id === targetId);
+      if (foundIdx >= 0) fcIndex = foundIdx;
+    } else if (customPool && customPool.length) {
+      activeCharId = customPool[0].id;
+      fcIndex = 0;
+    }
+  }
+
+  function clearFilteredPool() {
+    customPool = null;
+  }
+
   function splitSvgSubPaths(d) {
     const raw = String(d || '').trim();
     if (!raw) return [];
@@ -149,7 +165,7 @@ const StudyModule = (() => {
   function syncSubTabVisibility() {
     const hiraBar = document.getElementById('hiraganaSubTabs');
     const genBar = document.getElementById('generalSubTabs');
-    const isHira = currentCategory === 'hiragana';
+    const isHira = currentCategory === 'hiragana' && !customPool;
 
     hiraBar?.classList.toggle('hidden', !isHira);
     genBar?.classList.toggle('hidden', isHira);
@@ -163,14 +179,15 @@ const StudyModule = (() => {
     buttons.forEach(b => b.classList.toggle('active', b.dataset.mode === currentMode));
   }
 
-  function setCategory(category) {
+  function setCategory(category, resetCustom = true) {
     stopStrokeAnimation();
+    if (resetCustom) customPool = null;
     currentCategory = category || 'hiragana';
     fcIndex = 0;
     fcFlipped = false;
     selectedRow = 'all';
 
-    const list = currentCategory === 'hiragana'
+    const list = currentCategory === 'hiragana' && !customPool
       ? getHiraganaList()
       : getItemsByCategory(currentCategory);
     if (list.length) {
@@ -184,7 +201,7 @@ const StudyModule = (() => {
     currentMode = mode || 'chart';
     fcFlipped = false;
 
-    const list = currentCategory === 'hiragana'
+    const list = currentCategory === 'hiragana' && !customPool
       ? getHiraganaList()
       : getItemsByCategory(currentCategory);
 
@@ -201,7 +218,7 @@ const StudyModule = (() => {
   }
 
   function getActiveSpeakingText() {
-    const list = currentCategory === 'hiragana'
+    const list = currentCategory === 'hiragana' && !customPool
       ? getHiraganaList()
       : getItemsByCategory(currentCategory);
     const item = getItemById(activeCharId) || list[fcIndex] || list[0];
@@ -213,7 +230,7 @@ const StudyModule = (() => {
   }
 
   function stepItem(delta) {
-    const list = currentCategory === 'hiragana'
+    const list = currentCategory === 'hiragana' && !customPool
       ? getHiraganaList()
       : getItemsByCategory(currentCategory);
     if (!list.length) return;
@@ -245,12 +262,13 @@ const StudyModule = (() => {
     }
   }
 
-  // 상단 요약 진도표 렌더링
   function renderSummaryBanner(category) {
     const banner = document.getElementById('studySummaryBanner');
     if (!banner) return;
 
-    const targetItems = category === 'hiragana' ? getHiraganaList() : getItemsByCategory(category);
+    const targetItems = customPool && customPool.length
+      ? customPool
+      : (category === 'hiragana' ? getHiraganaList() : getItemsByCategory(category));
     const state = DB.load();
 
     let masteredCount = 0;
@@ -268,6 +286,7 @@ const StudyModule = (() => {
     const reviewCount = DB.getReviewNeededItems(targetItems).length;
 
     const catTitleMap = {
+      all: '필터 선택 항목',
       hiragana: '히라가나 (50음도)',
       katakana: '가타카나',
       noun: '명사',
@@ -276,12 +295,17 @@ const StudyModule = (() => {
       verb: '동사'
     };
 
+    const titleText = customPool && customPool.length
+      ? `필터 선택 항목 (${total}개)`
+      : (catTitleMap[category] || '학습 영역');
+
     banner.innerHTML = `
       <div style="width:100%;">
         <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
           <div>
-            <strong>${catTitleMap[category] || '학습 영역'} 진도표</strong>
+            <strong>${titleText} 진도표</strong>
             <span class="hint-text"> · 학습완료 ${masteredCount}/${total} (${memorizedPercent}%)</span>
+            ${customPool && customPool.length ? `<button type="button" class="btn" id="clearCustomPoolBtn" style="margin-left:8px; padding:3px 8px; font-size:0.72rem;">전체 보기 복귀</button>` : ''}
           </div>
           <div class="summary-metrics">
             <span class="metric-pill">🎯 완료율 ${memorizedPercent}%</span>
@@ -295,6 +319,11 @@ const StudyModule = (() => {
         </div>
       </div>
     `;
+
+    document.getElementById('clearCustomPoolBtn')?.addEventListener('click', () => {
+      clearFilteredPool();
+      render(currentCategory, window.AppController?.refreshDashboard);
+    });
   }
 
   function render(category = currentCategory, onProgressChange = null) {
@@ -307,7 +336,7 @@ const StudyModule = (() => {
 
     renderSummaryBanner(currentCategory);
 
-    const items = currentCategory === 'hiragana'
+    const items = currentCategory === 'hiragana' && !customPool
       ? getHiraganaList()
       : getItemsByCategory(currentCategory);
 
@@ -316,14 +345,14 @@ const StudyModule = (() => {
         <div class="card">
           <h3>아직 준비 중인 학습 영역입니다</h3>
           <p class="hint-text" style="margin-top:6px;">
-            현재 히라가나 46자 학습 기능이 우선 탑재되어 있습니다. 상단 또는 사이드바에서 <strong>히라가나</strong>를 선택해 학습을 시작해 보세요!
+            상단 또는 사이드바에서 <strong>히라가나</strong>를 선택해 학습을 시작해 보세요.
           </p>
         </div>
       `;
       return;
     }
 
-    if (currentCategory === 'hiragana') {
+    if (currentCategory === 'hiragana' && !customPool) {
       if (currentMode === 'chart') renderHiraganaChart(container, onProgressChange);
       else if (currentMode === 'flashcard') renderFlashcard(container, items, onProgressChange);
       else if (currentMode === 'stroke') renderStrokeAndTrace(container, items, onProgressChange);
@@ -333,10 +362,10 @@ const StudyModule = (() => {
       if (currentMode === 'chart') renderGeneralList(container, items, onProgressChange);
       else if (currentMode === 'flashcard') renderFlashcard(container, items, onProgressChange);
       else if (currentMode === 'stroke') renderStrokeAndTrace(container, items, onProgressChange);
+      else renderGeneralList(container, items, onProgressChange);
     }
   }
 
-  // 1. 히라가나 50음도 2차원 그리드 (3단계: 50음도표 전용 아이콘만 표시)
   function renderHiraganaChart(container, onProgressChange) {
     const hiraList = getHiraganaList();
     const mapById = new Map(hiraList.map(item => [item.id, item]));
@@ -368,7 +397,6 @@ const StudyModule = (() => {
           <h3>히라가나 50음도 표</h3>
           <span class="hint-text">❌️ 미학습 · ❗️ 학습중 · ✅️ 학습완료 · 🔥 어려움</span>
         </div>
-
         <div class="gojuon-grid">${tilesHtml}</div>
       </div>
     `;
@@ -403,7 +431,10 @@ const StudyModule = (() => {
     });
   }
 
-  // 문자 상세 팝업
+  function openCharDetailById(id, onProgressChange) {
+    openCharDetailModal(id, onProgressChange);
+  }
+
   function openCharDetailModal(id, onProgressChange) {
     const item = getItemById(id);
     const modal = document.getElementById('charDetailModal');
@@ -484,7 +515,9 @@ const StudyModule = (() => {
     document.getElementById('modalFavBtn')?.addEventListener('click', () => {
       DB.toggleFavorite(item.id);
       openCharDetailModal(item.id, onProgressChange);
-      if (currentMode === 'chart') renderHiraganaChart(document.getElementById('studyContainer'), onProgressChange);
+      if (currentMode === 'chart' && !customPool) {
+        renderHiraganaChart(document.getElementById('studyContainer'), onProgressChange);
+      }
       renderSummaryBanner(currentCategory);
       if (onProgressChange) onProgressChange();
     });
@@ -494,7 +527,9 @@ const StudyModule = (() => {
         DB.setStatus(item.id, btn.dataset.st);
         openCharDetailModal(item.id, onProgressChange);
         renderSummaryBanner(currentCategory);
-        if (currentMode === 'chart') renderHiraganaChart(document.getElementById('studyContainer'), onProgressChange);
+        if (currentMode === 'chart' && !customPool) {
+          renderHiraganaChart(document.getElementById('studyContainer'), onProgressChange);
+        }
         if (onProgressChange) onProgressChange();
       });
     });
@@ -516,7 +551,6 @@ const StudyModule = (() => {
     });
   }
 
-  // 2. 문자별 플래시카드
   function renderFlashcard(container, items, onProgressChange) {
     if (!items.length) return;
     if (fcIndex >= items.length) fcIndex = 0;
@@ -607,7 +641,6 @@ const StudyModule = (() => {
     });
   }
 
-  // 4단계: 스와이프/스크롤 가능한 히라가나 목록 탭 바 바인딩
   function attachSwipeableKanaTabs(tabBarEl, items, onSelectItem) {
     if (!tabBarEl) return;
 
@@ -690,7 +723,6 @@ const StudyModule = (() => {
     }, { passive: true });
   }
 
-  // 3. 획순 & 따라쓰기 (4단계 스와이프 탭 + 5단계 정밀 SVG 획순 애니메이션 & 시작점 번호 마커)
   function renderStrokeAndTrace(container, items, onProgressChange) {
     if (!items.length) return;
     const item = getItemById(activeCharId) || items[0];
@@ -703,7 +735,7 @@ const StudyModule = (() => {
     const strokes = normalizeStrokeList(item);
     const isFav = DB.isFavorite(item.id);
     const st = DB.getStatus(item.id);
-    const hiraTabsSource = currentCategory === 'hiragana' ? getHiraganaList() : items;
+    const hiraTabsSource = currentCategory === 'hiragana' && !customPool ? getHiraganaList() : items;
 
     container.innerHTML = `
       <div class="card">
@@ -893,9 +925,7 @@ const StudyModule = (() => {
             <text x="${cx}" y="${cy + 2.3}" text-anchor="middle" font-size="6.5" font-weight="800" fill="#ffffff">${i + 1}</text>
           </g>
         `;
-      } catch (e) {
-        // 유효하지 않은 경로 방어
-      }
+      } catch (e) {}
     }
     markerLayer.innerHTML = html;
   }
@@ -989,7 +1019,6 @@ const StudyModule = (() => {
     strokeAnimRafId = requestAnimationFrame(() => runStep(startIdx));
   }
 
-  // 4. 연상 암기법 + 3지선다 확인 문제 + 히라가나 심화 규칙 정리 (6단계)
   function renderMnemonicTab(container, items, onProgressChange) {
     if (!items.length) return;
     const item = getItemById(activeCharId) || items[0];
@@ -1084,7 +1113,6 @@ const StudyModule = (() => {
     });
   }
 
-  // 5. 문자별 단어·예문 + 행 이동
   function renderWordsAndExamplesTab(container, items, onProgressChange) {
     if (!items.length) return;
     const item = getItemById(activeCharId) || items[0];
@@ -1172,7 +1200,6 @@ const StudyModule = (() => {
     });
   }
 
-  // 타 카테고리 목록 뷰 (50음도 외 화면: ❌ / ❗️ / ✅ / 🔥 + 상태명)
   function renderGeneralList(container, items, onProgressChange) {
     container.innerHTML = `
       <div class="card">
@@ -1218,6 +1245,9 @@ const StudyModule = (() => {
   return {
     setCategory,
     setMode,
+    setFilteredPool,
+    clearFilteredPool,
+    openCharDetailById,
     render,
     speakText,
     stepItem,
