@@ -1,6 +1,8 @@
-// 학습 상태·진도·퀴즈 기록을 localStorage에 관리하는 DB 모듈
+// 학습 영역별 독립 localStorage 저장소 및 진도·퀴즈·작문 통계 DB 모듈
 const DB = (() => {
-  const STORAGE_KEY = 'jp_study_db_v1';
+  const PREFS_KEY = 'jp_study_v2_prefs';
+  const CAT_PREFIX = 'jp_study_v2_cat_';
+  const CATEGORIES = ['hiragana', 'katakana', 'noun', 'i_adj', 'na_adj', 'verb'];
 
   const STATUS = {
     UNLEARNED: 'unlearned',
@@ -9,7 +11,6 @@ const DB = (() => {
     MASTERED: 'mastered'
   };
 
-  // 기존 라벨 유지
   const STATUS_LABEL = {
     [STATUS.UNLEARNED]: '미학습',
     [STATUS.LEARNING]: '학습중',
@@ -17,15 +18,26 @@ const DB = (() => {
     [STATUS.MASTERED]: '암기완료'
   };
 
-  // 문맥별 상태 표기 설정
-  // 50음도표(isChart = true): 아이콘만 표시 (❌️, ❗️, ✅️, 🔥)
-  // 그 외 화면(isChart = false): ❌ 미학습 / ❗️ 학습중 / ✅ 학습완료 / 🔥 어려움
   const STATUS_DISPLAY = {
     [STATUS.UNLEARNED]: { chartIcon: '❌️', icon: '❌', text: '미학습' },
     [STATUS.LEARNING]:  { chartIcon: '❗️', icon: '❗️', text: '학습중' },
     [STATUS.HARD]:      { chartIcon: '🔥', icon: '🔥', text: '어려움' },
     [STATUS.MASTERED]:  { chartIcon: '✅️', icon: '✅', text: '학습완료' }
   };
+
+  let activeCategory = 'hiragana';
+
+  function normalizeCategory(cat) {
+    return CATEGORIES.includes(cat) ? cat : activeCategory || 'hiragana';
+  }
+
+  function setActiveCategory(cat) {
+    if (CATEGORIES.includes(cat)) activeCategory = cat;
+  }
+
+  function getActiveCategory() {
+    return activeCategory;
+  }
 
   function getStatusDisplay(statusKey, isChart = false) {
     const key = Object.prototype.hasOwnProperty.call(STATUS_DISPLAY, statusKey)
@@ -35,28 +47,18 @@ const DB = (() => {
     return isChart ? entry.chartIcon : `${entry.icon} ${entry.text}`;
   }
 
-  function getStatusIcon(statusKey, isChart = false) {
-    const key = Object.prototype.hasOwnProperty.call(STATUS_DISPLAY, statusKey)
-      ? statusKey
-      : STATUS.UNLEARNED;
-    const entry = STATUS_DISPLAY[key];
-    return isChart ? entry.chartIcon : entry.icon;
-  }
-
   function getTodayKey() {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   }
 
-  function createDefaultState() {
+  function createDefaultCategoryState() {
     return {
-      statuses: {},       // { [itemId]: 'unlearned' | 'learning' | 'hard' | 'mastered' }
-      favorites: [],      // [itemId, ...]
-      lastReviewed: {},   // { [itemId]: timestamp }
-      wrongNotes: [],     // [{ id, itemId, jp, romaji, meaning, reason, timestamp }]
+      statuses: {},
+      favorites: [],
+      lastReviewed: {},
+      wrongNotes: [],
+      writingSolved: {},
       quizStats: {
         totalAttempts: 0,
         correctCount: 0,
@@ -67,77 +69,78 @@ const DB = (() => {
         streakDays: 1,
         lastStudyDate: getTodayKey(),
         todayCount: 0
-      },
-      preferences: {
-        theme: 'light',
-        hideMeaning: false,
-        sidebarCollapsed: false
       }
     };
   }
 
-  function normalizeState(raw) {
-    const def = createDefaultState();
-    if (!raw || typeof raw !== 'object') return def;
-
-    const merged = {
-      ...def,
-      ...raw,
-      statuses: raw.statuses && typeof raw.statuses === 'object' ? raw.statuses : {},
-      favorites: Array.isArray(raw.favorites) ? raw.favorites : [],
-      lastReviewed: raw.lastReviewed && typeof raw.lastReviewed === 'object' ? raw.lastReviewed : {},
-      wrongNotes: Array.isArray(raw.wrongNotes) ? raw.wrongNotes : [],
-      quizStats: {
-        ...def.quizStats,
-        ...(raw.quizStats && typeof raw.quizStats === 'object' ? raw.quizStats : {})
-      },
-      studyLog: {
-        ...def.studyLog,
-        ...(raw.studyLog && typeof raw.studyLog === 'object' ? raw.studyLog : {})
-      },
-      preferences: {
-        ...def.preferences,
-        ...(raw.preferences && typeof raw.preferences === 'object' ? raw.preferences : {})
-      }
+  function createDefaultPrefs() {
+    return {
+      theme: 'light',
+      hideMeanings: false,
+      hideHints: false,
+      sidebarCollapsed: false
     };
-
-    const today = getTodayKey();
-    if (merged.studyLog.lastStudyDate !== today) {
-      const prevDate = merged.studyLog.lastStudyDate ? new Date(`${merged.studyLog.lastStudyDate}T00:00:00`) : null;
-      const curDate = new Date(`${today}T00:00:00`);
-      const diffDays = prevDate ? Math.round((curDate - prevDate) / 86400000) : 0;
-
-      if (diffDays === 1) {
-        merged.studyLog.streakDays = (merged.studyLog.streakDays || 0) + 1;
-      } else if (diffDays > 1) {
-        merged.studyLog.streakDays = 1;
-      } else if (!merged.studyLog.streakDays) {
-        merged.studyLog.streakDays = 1;
-      }
-      merged.studyLog.lastStudyDate = today;
-      merged.studyLog.todayCount = 0;
-    }
-
-    return merged;
   }
 
-  function load() {
+  function loadPreferences() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return createDefaultState();
-      return normalizeState(JSON.parse(raw));
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (!raw) return createDefaultPrefs();
+      return { ...createDefaultPrefs(), ...JSON.parse(raw) };
     } catch (e) {
-      console.warn('DB 불러오기 오류, 기본값으로 복구합니다:', e);
-      return createDefaultState();
+      return createDefaultPrefs();
     }
   }
 
-  function save(state) {
+  function savePreferences(partial = {}) {
+    const next = { ...loadPreferences(), ...partial };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(PREFS_KEY, JSON.stringify(next));
     } catch (e) {
-      console.warn('DB 저장 오류:', e);
+      console.warn('설정 저장 오류:', e);
     }
+    return next;
+  }
+
+  function loadCategory(cat = activeCategory) {
+    const key = CAT_PREFIX + normalizeCategory(cat);
+    const def = createDefaultCategoryState();
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return def;
+      const parsed = JSON.parse(raw);
+      return {
+        ...def,
+        ...parsed,
+        statuses: parsed?.statuses && typeof parsed.statuses === 'object' ? parsed.statuses : {},
+        favorites: Array.isArray(parsed?.favorites) ? parsed.favorites : [],
+        lastReviewed: parsed?.lastReviewed && typeof parsed.lastReviewed === 'object' ? parsed.lastReviewed : {},
+        wrongNotes: Array.isArray(parsed?.wrongNotes) ? parsed.wrongNotes : [],
+        writingSolved: parsed?.writingSolved && typeof parsed.writingSolved === 'object' ? parsed.writingSolved : {},
+        quizStats: { ...def.quizStats, ...(parsed?.quizStats || {}) },
+        studyLog: { ...def.studyLog, ...(parsed?.studyLog || {}) }
+      };
+    } catch (e) {
+      return def;
+    }
+  }
+
+  function saveCategory(state, cat = activeCategory) {
+    const key = CAT_PREFIX + normalizeCategory(cat);
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch (e) {
+      console.warn('카테고리 DB 저장 오류:', e);
+    }
+  }
+
+  // 기존 호환용 load/save (현재 활성 영역 기준)
+  function load(cat = activeCategory) {
+    return loadCategory(cat);
+  }
+
+  function save(state, cat = activeCategory) {
+    saveCategory(state, cat);
   }
 
   function bumpTodayStudy(state, amount = 1) {
@@ -147,60 +150,54 @@ const DB = (() => {
       state.studyLog.todayCount = 0;
     }
     state.studyLog.todayCount = (state.studyLog.todayCount || 0) + amount;
-    if (!state.studyLog.streakDays || state.studyLog.streakDays < 1) {
-      state.studyLog.streakDays = 1;
-    }
   }
 
-  function getStatus(itemId) {
-    const state = load();
+  function getStatus(itemId, cat = activeCategory) {
+    if (!itemId) return STATUS.UNLEARNED;
+    const state = loadCategory(cat);
     return state.statuses[itemId] || STATUS.UNLEARNED;
   }
 
-  function setStatus(itemId, nextStatus) {
+  function setStatus(itemId, nextStatus, cat = activeCategory) {
     if (!itemId || !Object.values(STATUS).includes(nextStatus)) return;
-    const state = load();
+    const state = loadCategory(cat);
     state.statuses[itemId] = nextStatus;
     state.lastReviewed[itemId] = Date.now();
     bumpTodayStudy(state, 1);
-    save(state);
+    saveCategory(state, cat);
   }
 
-  function touchItemAsSeen(itemId) {
+  function touchItemAsSeen(itemId, cat = activeCategory) {
     if (!itemId) return;
-    const state = load();
+    const state = loadCategory(cat);
     state.lastReviewed[itemId] = Date.now();
     if (!state.statuses[itemId] || state.statuses[itemId] === STATUS.UNLEARNED) {
       state.statuses[itemId] = STATUS.LEARNING;
       bumpTodayStudy(state, 1);
     }
-    save(state);
+    saveCategory(state, cat);
   }
 
-  function isFavorite(itemId) {
-    const state = load();
-    return state.favorites.includes(itemId);
+  function isFavorite(itemId, cat = activeCategory) {
+    return loadCategory(cat).favorites.includes(itemId);
   }
 
-  function toggleFavorite(itemId) {
+  function toggleFavorite(itemId, cat = activeCategory) {
     if (!itemId) return false;
-    const state = load();
+    const state = loadCategory(cat);
     const idx = state.favorites.indexOf(itemId);
-    let active = false;
-    if (idx >= 0) {
-      state.favorites.splice(idx, 1);
-      active = false;
-    } else {
-      state.favorites.push(itemId);
-      active = true;
-    }
-    save(state);
+    const active = idx < 0;
+    if (active) state.favorites.push(itemId);
+    else state.favorites.splice(idx, 1);
+    saveCategory(state, cat);
     return active;
   }
 
-  function recordQuiz(isCorrect, item, reason = '퀴즈 오답') {
-    const state = load();
+  function recordQuiz(isCorrect, item, reason = '퀴즈 오답', cat = null) {
+    const targetCat = normalizeCategory(cat || item?.category || activeCategory);
+    const state = loadCategory(targetCat);
     state.quizStats.totalAttempts = (state.quizStats.totalAttempts || 0) + 1;
+
     if (isCorrect) {
       state.quizStats.correctCount = (state.quizStats.correctCount || 0) + 1;
       if (item && item.id) {
@@ -215,67 +212,73 @@ const DB = (() => {
         state.statuses[item.id] = STATUS.HARD;
       }
       const existingIdx = state.wrongNotes.findIndex(w => w.itemId === item.id);
+      const prevCount = existingIdx >= 0 ? (state.wrongNotes[existingIdx].wrongCount || 1) : 0;
       const entry = {
-        id: existingIdx >= 0 ? state.wrongNotes[existingIdx].id : `${item.id}_${Date.now()}`,
+        id: item.id,
         itemId: item.id,
         jp: item.jp || '',
         romaji: item.romaji || '',
         meaning: item.meaning || '',
         reason,
+        wrongCount: prevCount + 1,
         timestamp: Date.now()
       };
-      if (existingIdx >= 0) {
-        state.wrongNotes[existingIdx] = entry;
-      } else {
-        state.wrongNotes.unshift(entry);
-      }
+      if (existingIdx >= 0) state.wrongNotes[existingIdx] = entry;
+      else state.wrongNotes.unshift(entry);
     }
     bumpTodayStudy(state, 1);
-    save(state);
+    saveCategory(state, targetCat);
   }
 
-  function removeWrongNote(itemId) {
-    const state = load();
-    state.wrongNotes = state.wrongNotes.filter(w => w.itemId !== itemId);
-    save(state);
+  function removeWrongNote(itemId, cat = activeCategory) {
+    const state = loadCategory(cat);
+    state.wrongNotes = state.wrongNotes.filter(w => w.itemId !== itemId && w.id !== itemId);
+    saveCategory(state, cat);
   }
 
-  function recordGameClear(score = 0, isTimeAttack = false) {
-    const state = load();
+  function recordGameClear(score = 0, isTimeAttack = false, cat = activeCategory) {
+    const state = loadCategory(cat);
     state.quizStats.gameClears = (state.quizStats.gameClears || 0) + 1;
-    if (isTimeAttack && typeof score === 'number') {
+    if (isTimeAttack && Number.isFinite(score)) {
       state.quizStats.bestScore = Math.max(state.quizStats.bestScore || 0, score);
     }
     bumpTodayStudy(state, 1);
-    save(state);
+    saveCategory(state, cat);
   }
 
-  function getReviewNeededItems(allItems = []) {
-    const state = load();
-    const now = Date.now();
-    const oneDayMs = 86400000;
-    const wrongSet = new Set(state.wrongNotes.map(w => w.itemId));
+  function markWritingSolved(index, cat = activeCategory) {
+    const state = loadCategory(cat);
+    state.writingSolved[String(index)] = true;
+    bumpTodayStudy(state, 1);
+    saveCategory(state, cat);
+  }
 
-    return allItems.filter(item => {
+  function getWritingSolvedCount(cat = activeCategory) {
+    const solved = loadCategory(cat).writingSolved || {};
+    return Object.values(solved).filter(Boolean).length;
+  }
+
+  function getReviewNeededItems(items = [], cat = activeCategory) {
+    const state = loadCategory(cat);
+    const wrongSet = new Set(state.wrongNotes.map(w => w.itemId || w.id));
+    return (Array.isArray(items) ? items : []).filter(item => {
+      if (!item || !item.id) return false;
       const st = state.statuses[item.id] || STATUS.UNLEARNED;
-      if (st === STATUS.HARD || wrongSet.has(item.id)) return true;
-      if (st === STATUS.LEARNING) {
-        const last = state.lastReviewed[item.id] || 0;
-        return now - last >= oneDayMs;
-      }
-      return false;
+      return st === STATUS.HARD || wrongSet.has(item.id);
     });
   }
 
-  function getProgressSummary(allItems = []) {
-    const state = load();
-    const total = allItems.length;
+  // 핵심 수정: 단일 영역(또는 전달된 items)의 진도율 객체를 안전하게 반환 (NaN/undefined 원천 차단)
+  function getCategoryProgress(items = [], cat = activeCategory) {
+    const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+    const state = loadCategory(cat);
+    const total = safeItems.length;
     let mastered = 0;
     let learning = 0;
     let hard = 0;
     let unlearned = 0;
 
-    allItems.forEach(item => {
+    safeItems.forEach(item => {
       const st = state.statuses[item.id] || STATUS.UNLEARNED;
       if (st === STATUS.MASTERED) mastered += 1;
       else if (st === STATUS.LEARNING) learning += 1;
@@ -283,9 +286,11 @@ const DB = (() => {
       else unlearned += 1;
     });
 
-    const accuracy = state.quizStats.totalAttempts > 0
-      ? Math.round((state.quizStats.correctCount / state.quizStats.totalAttempts) * 100)
-      : 0;
+    const percent = total > 0 ? Math.round((mastered / total) * 100) : 0;
+    const weightedPercent = total > 0 ? Math.round(((mastered + learning * 0.4 + hard * 0.2) / total) * 100) : 0;
+    const totalAttempts = Number(state.quizStats.totalAttempts) || 0;
+    const correctCount = Number(state.quizStats.correctCount) || 0;
+    const accuracy = totalAttempts > 0 ? Math.round((correctCount / totalAttempts) * 100) : 0;
 
     return {
       total,
@@ -293,75 +298,39 @@ const DB = (() => {
       learning,
       hard,
       unlearned,
-      masteredPercent: total > 0 ? Math.round((mastered / total) * 100) : 0,
-      overallPercent: total > 0 ? Math.round(((mastered + (learning + hard) * 0.5) / total) * 100) : 0,
-      favoritesCount: state.favorites.length,
-      wrongCount: state.wrongNotes.length,
+      percent,
+      weightedPercent,
       accuracy,
-      streakDays: state.studyLog.streakDays || 1,
-      todayCount: state.studyLog.todayCount || 0,
-      gameClears: state.quizStats.gameClears || 0,
-      bestScore: state.quizStats.bestScore || 0
+      totalAttempts,
+      correctCount,
+      bestScore: Number(state.quizStats.bestScore) || 0,
+      favoritesCount: state.favorites.length,
+      wrongCount: state.wrongNotes.length
     };
   }
 
-  function getCategoryProgress(allItems = []) {
-    const categories = [
-      { key: 'hiragana', label: '히라가나 (50음도)' },
-      { key: 'katakana', label: '가타카나' },
-      { key: 'noun', label: '명사' },
-      { key: 'i_adj', label: 'い형용사' },
-      { key: 'na_adj', label: 'な형용사' },
-      { key: 'verb', label: '동사' }
-    ];
-
-    return categories.map(cat => {
-      const list = allItems.filter(i => i.category === cat.key);
-      const summary = getProgressSummary(list);
-      return {
-        ...cat,
-        ...summary
-      };
-    });
-  }
-
-  function getPreferences() {
-    return load().preferences;
-  }
-
-  function updatePreferences(partial = {}) {
-    const state = load();
-    state.preferences = {
-      ...state.preferences,
-      ...partial
-    };
-    save(state);
-    return state.preferences;
-  }
-
-  function exportData() {
-    return JSON.stringify(load(), null, 2);
-  }
-
-  function importData(jsonText) {
-    const parsed = JSON.parse(jsonText);
-    const normalized = normalizeState(parsed);
-    save(normalized);
-    return normalized;
+  function resetCategory(cat = activeCategory) {
+    const fresh = createDefaultCategoryState();
+    saveCategory(fresh, cat);
+    return fresh;
   }
 
   function resetAll() {
-    const fresh = createDefaultState();
-    save(fresh);
-    return fresh;
+    CATEGORIES.forEach(c => saveCategory(createDefaultCategoryState(), c));
   }
 
   return {
     STATUS,
     STATUS_LABEL,
     STATUS_DISPLAY,
+    CATEGORIES,
+    setActiveCategory,
+    getActiveCategory,
     getStatusDisplay,
-    getStatusIcon,
+    loadPreferences,
+    savePreferences,
+    loadCategory,
+    saveCategory,
     load,
     save,
     getStatus,
@@ -372,13 +341,11 @@ const DB = (() => {
     recordQuiz,
     removeWrongNote,
     recordGameClear,
+    markWritingSolved,
+    getWritingSolvedCount,
     getReviewNeededItems,
-    getProgressSummary,
     getCategoryProgress,
-    getPreferences,
-    updatePreferences,
-    exportData,
-    importData,
+    resetCategory,
     resetAll
   };
 })();
